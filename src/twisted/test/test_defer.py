@@ -29,6 +29,7 @@ from typing import (
     Dict,
     Generator,
     List,
+    Literal,
     Mapping,
     NoReturn,
     Optional,
@@ -216,6 +217,18 @@ class DeferredTests(unittest.SynchronousTestCase, ImmediateFailureMixin):
         self.assertIsNone(self.errbackResults)
         self.assertEqual(self.callbackResults, (("hello",), {}))
         self.assertEqual(self.callback2Results, (("hello",), {}))
+
+    def test_callbacksAttributeDeprecated(self) -> None:
+        deferred: Deferred[str] = Deferred()
+        deferred.callbacks
+
+        warnings = self.flushWarnings()
+        self.assertEqual(1, len(warnings))
+        self.assertIs(DeprecationWarning, warnings[0]["category"])
+        self.assertIn(
+            "twisted.internet.defer.Deferred.callbacks was deprecated in Twisted",
+            warnings[0]["message"],
+        )
 
     def test_addCallbacksNoneErrback(self) -> None:
         """
@@ -594,6 +607,15 @@ class DeferredTests(unittest.SynchronousTestCase, ImmediateFailureMixin):
         d: Deferred[str] = defer.succeed("success")
         d.addCallback(l.append)
         self.assertEqual(l, ["success"])
+
+    def test_succeedMatchesManualSuccess(self) -> None:
+        """
+        C{defer.succeed(x)} is the same as as C{d = Deferred(); d.callback(x)}.
+        """
+        d: Deferred[str] = Deferred()
+        d.callback("success")
+        d2: Deferred[str] = defer.succeed("success")
+        self.assertEqual(d.__dict__, d2.__dict__)
 
     def testImmediateFailure(self) -> None:
         l: List[Failure] = []
@@ -3560,7 +3582,7 @@ class EnsureDeferredTests(unittest.TestCase):
 
         def run() -> Generator[Deferred[str], None, str]:
             d = defer.succeed("foo")
-            res = cast(str, (yield from d))
+            res = yield from d
             return res
 
         # It's a generator...
@@ -3759,7 +3781,7 @@ class CoroutineContextVarsTests(unittest.TestCase):
 
         # context is 1 when the function is defined
         @defer.inlineCallbacks
-        def testFunction() -> Generator[Deferred[Any], Any, None]:
+        def testFunction() -> Generator[Deferred[Any], Any, Literal[True]]:
             # Expected to be 2
             self.assertEqual(var.get(), 2)
 
@@ -3793,9 +3815,9 @@ class CoroutineContextVarsTests(unittest.TestCase):
             yield yieldingDeferred()
             self.assertEqual(var.get(), 2)
 
-            defer.returnValue(True)
+            return True
 
-        assert_type(testFunction, Callable[[], Deferred[None]])
+        assert_type(testFunction, Callable[[], Deferred[Literal[True]]])
         # The inlineCallbacks context is 2 when it's called
         var.set(2)
         d = testFunction()
