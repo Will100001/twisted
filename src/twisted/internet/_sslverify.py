@@ -1936,6 +1936,38 @@ class OpenSSLDiffieHellmanParameters:
         return cls(filePath)
 
 
+def _makeSelectionCallback(
+    acceptableProtocols: list[bytes],
+) -> Callable[[Connection, list[bytes]], bytes]:
+    """
+    Create a callback to make a selection from the given list of acceptable
+    protocols and the list of acceptable protocols communicated by the peer.
+    """
+
+    def protoSelectCallback(conn: Connection, protocols: list[bytes]) -> bytes:
+        """
+        NPN client-side and ALPN server-side callback used to select the next
+        protocol.  Prefers protocols found earlier in C{_acceptableProtocols}.
+
+        @param conn: The L{Connection} that is being established.
+
+        @param protocols: Protocols advertised by the other side.
+
+        @return: the selected protocol.
+        """
+        overlap = set(protocols) & set(acceptableProtocols)
+
+        for p in acceptableProtocols:
+            if p in overlap:
+                return p
+        else:
+            # TODO: I think this should really be OPENSSL_NPN_NO_OVERLAP, which
+            # is exposed by pyOpenSSL as OpenSSL.SSL.NO_OVERLAPPING_PROTOCOLS
+            return b""
+
+    return protoSelectCallback
+
+
 def _setAcceptableProtocols(
     context: SSL.Context, acceptableProtocols: list[bytes]
 ) -> None:
@@ -1966,33 +1998,19 @@ def _setAcceptableProtocols(
     if not acceptableProtocols:
         return
 
-    def protoSelectCallback(conn: Connection, protocols: list[bytes]) -> bytes:
-        """
-        NPN client-side and ALPN server-side callback used to select the next
-        protocol.  Prefers protocols found earlier in C{_acceptableProtocols}.
-
-        @param conn: The L{Connection} that is being established.
-
-        @param conn: Protocols advertised by the other side.
-        """
-        overlap = set(protocols) & set(acceptableProtocols)
-
-        for p in acceptableProtocols:
-            if p in overlap:
-                return p
-        else:
-            return b""
-
     supported = protocolNegotiationMechanisms()
 
+    # Note: it does not actually make sense to set both advertise / select
+    # callbacks in NPN or select/protos in ALPN on the *same* context, as one
+    # of these is for servers and one is for clients.
     if supported & ProtocolNegotiationSupport.NPN:
 
         def npnAdvertiseCallback(conn: Connection) -> list[bytes]:
             return acceptableProtocols
 
         context.set_npn_advertise_callback(npnAdvertiseCallback)
-        context.set_npn_select_callback(protoSelectCallback)
+        context.set_npn_select_callback(_makeSelectionCallback(acceptableProtocols))
 
     if supported & ProtocolNegotiationSupport.ALPN:
-        context.set_alpn_select_callback(protoSelectCallback)
+        context.set_alpn_select_callback(_makeSelectionCallback(acceptableProtocols))
         context.set_alpn_protos(acceptableProtocols)
