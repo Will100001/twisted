@@ -59,6 +59,8 @@ def old(
     def convert(p: TLSMemoryBIOProtocol) -> Connection:
         connection = oldMethod(p)
         connectionSetup(connection)
+        # NB: context setup needs to run *first*, and thus this is a bit of a
+        # doomed scenario.
         contextSetup(connection.get_context())
         return connection
 
@@ -77,9 +79,9 @@ def older(
 
     def convert(p: TLSMemoryBIOProtocol) -> Connection:
         context = olderMethod()
+        contextSetup(context)
         connection = Connection(context, None)
         connectionSetup(connection)
-        contextSetup(context)
         return connection
 
     return convert

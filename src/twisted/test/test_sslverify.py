@@ -27,14 +27,13 @@ from twisted.internet.address import IPv4Address
 from twisted.internet.error import CertificateError, ConnectionClosed, ConnectionLost
 from twisted.internet.interfaces import (
     IOpenSSLContextFactory,
-    IProtocol,
     IProtocolNegotiationFactory,
 )
-from twisted.internet.protocol import ClientFactory, ServerFactory
 from twisted.internet.ssl import CertificateOptions
 from twisted.internet.task import Clock
 from twisted.protocols.tls import SomeConnectionCreator
 from twisted.python.compat import nativeString
+from twisted.python.failure import Failure
 from twisted.python.filepath import FilePath
 from twisted.python.modules import getModule
 from twisted.python.reflect import requireModule
@@ -291,10 +290,61 @@ def certificatesForAuthorityAndServer(
     return caSelfCert, serverCert
 
 
+class GreetingServer(protocol.Protocol):
+    greeting = b"greetings!"
+
+    def connectionMade(self):
+        self.transport.write(self.greeting)
+
+
+class ListeningClient(protocol.Protocol):
+    data = b""
+    lostReason = None
+
+    def dataReceived(self, data):
+        self.data += data
+
+    def connectionLost(self, reason):
+        self.lostReason = reason
+
+
+@implementer(IProtocolNegotiationFactory)
+class IPNFactory(protocol.Factory):
+    """
+    A L{ClientFactory} that has a set of acceptable protocols for NPN/ALPN
+    negotiation.
+    """
+
+    def __init__(self, acceptableProtocols: list[bytes]) -> None:
+        """
+        Initialize this mixin.
+
+        @param acceptableProtocols: The protocols the client will accept
+            speaking after the TLS handshake is complete.
+        @type acceptableProtocols: L{list} of L{bytes}
+        """
+        self._acceptableProtocols = acceptableProtocols
+
+    def acceptableProtocols(self) -> list[bytes]:
+        """
+        Returns a list of protocols that can be spoken by the connection
+        factory in the form of ALPN tokens, as laid out in the IANA registry
+        for ALPN tokens.
+
+        @return: a list of ALPN tokens in order of preference.
+        @rtype: L{list} of L{bytes}
+        """
+        return self._acceptableProtocols
+
+
 def _loopbackTLSConnection(
     serverOpts: SomeConnectionCreator,
     clientOpts: SomeConnectionCreator,
-) -> tuple[TLSMemoryBIOProtocol, TLSMemoryBIOProtocol, IProtocol, IProtocol, IOPump]:
+    serverNegotiationProtocols: list[bytes] | None = None,
+    clientNegotiationProtocols: list[bytes] | None = None,
+) -> tuple[
+    TLSMemoryBIOProtocol, TLSMemoryBIOProtocol, GreetingServer, ListeningClient, IOPump
+]:
     """
     Common implementation code for both L{loopbackTLSConnection} and
     L{loopbackTLSConnectionInMemory}. Creates a loopback TLS connection
@@ -313,28 +363,20 @@ def _loopbackTLSConnection(
     @rtype: L{tuple}
     """
 
-    class GreetingServer(protocol.Protocol):
-        greeting = b"greetings!"
-
-        def connectionMade(self):
-            self.transport.write(self.greeting)
-
-    class ListeningClient(protocol.Protocol):
-        data = b""
-        lostReason = None
-
-        def dataReceived(self, data):
-            self.data += data
-
-        def connectionLost(self, reason):
-            self.lostReason = reason
-
     clientWrappedProto = ListeningClient()
     serverWrappedProto = GreetingServer()
 
-    plainClientFactory = protocol.Factory()
+    plainClientFactory = (
+        protocol.Factory()
+        if clientNegotiationProtocols is None
+        else IPNFactory(clientNegotiationProtocols)
+    )
     plainClientFactory.protocol = lambda: clientWrappedProto
-    plainServerFactory = protocol.Factory()
+    plainServerFactory = (
+        protocol.Factory()
+        if serverNegotiationProtocols is None
+        else IPNFactory(serverNegotiationProtocols)
+    )
     plainServerFactory.protocol = lambda: serverWrappedProto
 
     clock = Clock()
@@ -359,7 +401,9 @@ def loopbackTLSConnection(
     trustRoot: IOpenSSLTrustRoot,
     privateKeyFile: str,
     chainedCertFile: str | None = None,
-) -> tuple[TLSMemoryBIOProtocol, TLSMemoryBIOProtocol, IProtocol, IProtocol, IOPump]:
+) -> tuple[
+    TLSMemoryBIOProtocol, TLSMemoryBIOProtocol, GreetingServer, ListeningClient, IOPump
+]:
     """
     Create a loopback TLS connection with the given trust and keys.
 
@@ -404,11 +448,14 @@ def loopbackTLSConnectionInMemory(
     trustRoot: IOpenSSLTrustRoot,
     privateKey: PKey,
     serverCertificate: X509,
-    clientProtocols: list[bytes] | None = None,
     serverProtocols: list[bytes] | None = None,
+    clientProtocols: list[bytes] | None = None,
     clientOptions: type[CertificateOptions] | None = None,
     protocolsFromFactory: bool = False,
-) -> tuple[TLSMemoryBIOProtocol, TLSMemoryBIOProtocol, IProtocol, IProtocol, IOPump]:
+    viaFactory: bool = False,
+) -> tuple[
+    TLSMemoryBIOProtocol, TLSMemoryBIOProtocol, GreetingServer, ListeningClient, IOPump
+]:
     """
     Create a loopback TLS connection with the given trust and keys. Like
     L{loopbackTLSConnection}, but using in-memory certificates and keys rather
@@ -439,16 +486,25 @@ def loopbackTLSConnectionInMemory(
     if clientOptions is None:
         clientOptions = sslverify.OpenSSLCertificateOptions
 
-    clientCertOpts = clientOptions(
-        trustRoot=trustRoot, acceptableProtocols=clientProtocols
-    )
-    serverCertOpts = sslverify.OpenSSLCertificateOptions(
-        privateKey=privateKey,
-        certificate=serverCertificate,
-        acceptableProtocols=serverProtocols,
-    )
-
-    return _loopbackTLSConnection(serverCertOpts, clientCertOpts)
+    if viaFactory:
+        clientCertOpts = clientOptions(trustRoot=trustRoot)
+        serverCertOpts = sslverify.OpenSSLCertificateOptions(
+            privateKey=privateKey, certificate=serverCertificate
+        )
+        return _loopbackTLSConnection(
+            serverCertOpts, clientCertOpts, serverProtocols, clientProtocols
+        )
+    else:
+        clientCertOpts = clientOptions(
+            trustRoot=trustRoot,
+            acceptableProtocols=clientProtocols,
+        )
+        serverCertOpts = sslverify.OpenSSLCertificateOptions(
+            privateKey=privateKey,
+            certificate=serverCertificate,
+            acceptableProtocols=serverProtocols,
+        )
+        return _loopbackTLSConnection(serverCertOpts, clientCertOpts)
 
 
 def pathContainingDumpOf(testCase, *dumpables):
@@ -2482,14 +2538,25 @@ class ServiceIdentityTests(SynchronousTestCase):
         self.assertIsNone(sErr)
 
 
-def negotiateProtocol(serverProtocols, clientProtocols, clientOptions=None):
+def negotiateProtocol(
+    serverProtocols: list[bytes],
+    clientProtocols: list[bytes],
+    clientOptions: type[CertificateOptions] | None = None,
+    viaFactory: bool = False,
+) -> tuple[bytes, Failure | None]:
     """
     Create the TLS connection and negotiate a next protocol.
 
     @param serverProtocols: The protocols the server is willing to negotiate.
+
     @param clientProtocols: The protocols the client is willing to negotiate.
-    @param clientOptions: The type of C{OpenSSLCertificateOptions} class to
-        use for the client. Defaults to C{OpenSSLCertificateOptions}.
+
+    @param clientOptions: The type of C{OpenSSLCertificateOptions} class to use
+        for the client.  Defaults to C{OpenSSLCertificateOptions}.
+
+    @param viaFactory: whether to supply the client protocols or the server
+        protocols via the protocol factory rather than via the context factory.
+
     @return: A L{tuple} of the negotiated protocol and the reason the
         connection was lost.
     """
@@ -2503,68 +2570,11 @@ def negotiateProtocol(serverProtocols, clientProtocols, clientOptions=None):
         clientProtocols=clientProtocols,
         serverProtocols=serverProtocols,
         clientOptions=clientOptions,
+        viaFactory=viaFactory,
     )
     pump.flush()
 
     return (cProto.negotiatedProtocol, cWrapped.lostReason)
-
-
-@implementer(IProtocolNegotiationFactory)
-class ClientNegotiationFactory(ClientFactory):
-    """
-    A L{ClientFactory} that has a set of acceptable protocols for NPN/ALPN
-    negotiation.
-    """
-
-    def __init__(self, acceptableProtocols):
-        """
-        Create a L{ClientNegotiationFactory}.
-
-        @param acceptableProtocols: The protocols the client will accept
-            speaking after the TLS handshake is complete.
-        @type acceptableProtocols: L{list} of L{bytes}
-        """
-        self._acceptableProtocols = acceptableProtocols
-
-    def acceptableProtocols(self):
-        """
-        Returns a list of protocols that can be spoken by the connection
-        factory in the form of ALPN tokens, as laid out in the IANA registry
-        for ALPN tokens.
-
-        @return: a list of ALPN tokens in order of preference.
-        @rtype: L{list} of L{bytes}
-        """
-        return self._acceptableProtocols
-
-
-@implementer(IProtocolNegotiationFactory)
-class ServerNegotiationFactory(ServerFactory):
-    """
-    A L{ServerFactory} that has a set of acceptable protocols for NPN/ALPN
-    negotiation.
-    """
-
-    def __init__(self, acceptableProtocols):
-        """
-        Create a L{ServerNegotiationFactory}.
-
-        @param acceptableProtocols: The protocols the server will accept
-            speaking after the TLS handshake is complete.
-        @type acceptableProtocols: L{list} of L{bytes}
-        """
-        self._acceptableProtocols = acceptableProtocols
-
-    def acceptableProtocols(self):
-        """
-        Returns a list of protocols that can be spoken by the connection
-        factory in the form of ALPN tokens, as laid out in the IANA registry
-        for ALPN tokens.
-
-        @return: a list of ALPN tokens in order of preference.
-        @rtype: L{list} of L{bytes}
-        """
-        return self._acceptableProtocols
 
 
 class NPNOrALPNTests(TestCase):
@@ -2580,7 +2590,7 @@ class NPNOrALPNTests(TestCase):
     elif skipNPN:
         skip = skipNPN
 
-    def test_nextProtocolMechanismsNPNIsSupported(self):
+    def test_nextProtocolMechanismsNPNIsSupported(self) -> None:
         """
         When at least NPN is available on the platform, NPN is in the set of
         supported negotiation protocols.
@@ -2588,7 +2598,7 @@ class NPNOrALPNTests(TestCase):
         supportedProtocols = sslverify.protocolNegotiationMechanisms()
         self.assertTrue(sslverify.ProtocolNegotiationSupport.NPN in supportedProtocols)
 
-    def test_NPNAndALPNSuccess(self):
+    def test_NPNAndALPNSuccess(self) -> None:
         """
         When both ALPN and NPN are used, and both the client and server have
         overlapping protocol choices, a protocol is successfully negotiated.
@@ -2602,7 +2612,7 @@ class NPNOrALPNTests(TestCase):
         self.assertEqual(negotiatedProtocol, b"h2")
         self.assertIsNone(lostReason)
 
-    def test_NPNAndALPNDifferent(self):
+    def test_NPNAndALPNDifferent(self) -> None:
         """
         Client and server have different protocol lists: only the common
         element is chosen.
@@ -2616,7 +2626,7 @@ class NPNOrALPNTests(TestCase):
         self.assertEqual(negotiatedProtocol, b"http/1.1")
         self.assertIsNone(lostReason)
 
-    def test_NPNAndALPNNoAdvertise(self):
+    def test_NPNAndALPNNoAdvertise(self) -> None:
         """
         When one peer does not advertise any protocols, the connection is set
         up with no next protocol.
@@ -2629,7 +2639,7 @@ class NPNOrALPNTests(TestCase):
         self.assertIsNone(negotiatedProtocol)
         self.assertIsNone(lostReason)
 
-    def test_NPNAndALPNNoOverlap(self):
+    def test_NPNAndALPNNoOverlap(self) -> None:
         """
         When the client and server have no overlap of protocols, the connection
         fails.
@@ -2641,10 +2651,8 @@ class NPNOrALPNTests(TestCase):
             clientProtocols=serverProtocols,
         )
         self.assertIsNone(negotiatedProtocol)
+        assert lostReason is not None, "connection should have completed"
         self.assertEqual(lostReason.type, SSL.Error)
-
-    def test_emptyNegotiate(self) -> None:
-        """ """
 
 
 class ALPNTests(TestCase):
@@ -2670,6 +2678,25 @@ class ALPNTests(TestCase):
         """
         supportedProtocols = sslverify.protocolNegotiationMechanisms()
         self.assertTrue(sslverify.ProtocolNegotiationSupport.ALPN in supportedProtocols)
+
+    def test_connectionCreatorNegotiation(self) -> None:
+        protocols = [b"a", b"b"]
+        negotiatedProtocol, lostReason = negotiateProtocol(
+            clientProtocols=protocols,
+            serverProtocols=protocols,
+        )
+        self.assertIsNone(lostReason)
+        self.assertEqual(negotiatedProtocol, b"a")
+
+    def test_factoryNegotiation(self) -> None:
+        protocols = [b"a", b"b"]
+        negotiatedProtocol, lostReason = negotiateProtocol(
+            clientProtocols=protocols,
+            serverProtocols=protocols,
+            viaFactory=True,
+        )
+        self.assertIsNone(lostReason)
+        self.assertEqual(negotiatedProtocol, b"a")
 
     def test_negotiateEmpty(self) -> None:
         """
