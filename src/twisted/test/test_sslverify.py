@@ -22,15 +22,23 @@ from incremental import Version
 
 from twisted.internet import defer, interfaces, protocol, reactor
 from twisted.internet._idna import _idnaText
+from twisted.internet._sslverify import IOpenSSLTrustRoot
 from twisted.internet.address import IPv4Address
 from twisted.internet.error import CertificateError, ConnectionClosed, ConnectionLost
-from twisted.internet.interfaces import IOpenSSLContextFactory
+from twisted.internet.interfaces import (
+    IOpenSSLContextFactory,
+    IProtocol,
+    IProtocolNegotiationFactory,
+)
+from twisted.internet.protocol import ClientFactory, ServerFactory
+from twisted.internet.ssl import CertificateOptions
 from twisted.internet.task import Clock
+from twisted.protocols.tls import SomeConnectionCreator
 from twisted.python.compat import nativeString
 from twisted.python.filepath import FilePath
 from twisted.python.modules import getModule
 from twisted.python.reflect import requireModule
-from twisted.test.iosim import connectedServerAndClient
+from twisted.test.iosim import IOPump, connectedServerAndClient
 from twisted.trial import util
 from twisted.trial.unittest import SkipTest, SynchronousTestCase, TestCase
 
@@ -283,7 +291,10 @@ def certificatesForAuthorityAndServer(
     return caSelfCert, serverCert
 
 
-def _loopbackTLSConnection(serverOpts, clientOpts):
+def _loopbackTLSConnection(
+    serverOpts: SomeConnectionCreator,
+    clientOpts: SomeConnectionCreator,
+) -> tuple[TLSMemoryBIOProtocol, TLSMemoryBIOProtocol, IProtocol, IProtocol, IOPump]:
     """
     Common implementation code for both L{loopbackTLSConnection} and
     L{loopbackTLSConnectionInMemory}. Creates a loopback TLS connection
@@ -344,7 +355,11 @@ def _loopbackTLSConnection(serverOpts, clientOpts):
     return sProto, cProto, serverWrappedProto, clientWrappedProto, pump
 
 
-def loopbackTLSConnection(trustRoot, privateKeyFile, chainedCertFile=None):
+def loopbackTLSConnection(
+    trustRoot: IOpenSSLTrustRoot,
+    privateKeyFile: str,
+    chainedCertFile: str | None = None,
+) -> tuple[TLSMemoryBIOProtocol, TLSMemoryBIOProtocol, IProtocol, IProtocol, IOPump]:
     """
     Create a loopback TLS connection with the given trust and keys.
 
@@ -386,13 +401,14 @@ def loopbackTLSConnection(trustRoot, privateKeyFile, chainedCertFile=None):
 
 
 def loopbackTLSConnectionInMemory(
-    trustRoot,
-    privateKey,
-    serverCertificate,
-    clientProtocols=None,
-    serverProtocols=None,
-    clientOptions=None,
-):
+    trustRoot: IOpenSSLTrustRoot,
+    privateKey: PKey,
+    serverCertificate: X509,
+    clientProtocols: list[bytes] | None = None,
+    serverProtocols: list[bytes] | None = None,
+    clientOptions: type[CertificateOptions] | None = None,
+    protocolsFromFactory: bool = False,
+) -> tuple[TLSMemoryBIOProtocol, TLSMemoryBIOProtocol, IProtocol, IProtocol, IOPump]:
     """
     Create a loopback TLS connection with the given trust and keys. Like
     L{loopbackTLSConnection}, but using in-memory certificates and keys rather
@@ -2478,11 +2494,7 @@ def negotiateProtocol(serverProtocols, clientProtocols, clientOptions=None):
         connection was lost.
     """
     caCertificate, serverCertificate = certificatesForAuthorityAndServer()
-    trustRoot = sslverify.OpenSSLCertificateAuthorities(
-        [
-            caCertificate.original,
-        ]
-    )
+    trustRoot = sslverify.OpenSSLCertificateAuthorities([caCertificate.original])
 
     sProto, cProto, sWrapped, cWrapped, pump = loopbackTLSConnectionInMemory(
         trustRoot=trustRoot,
@@ -2495,6 +2507,64 @@ def negotiateProtocol(serverProtocols, clientProtocols, clientOptions=None):
     pump.flush()
 
     return (cProto.negotiatedProtocol, cWrapped.lostReason)
+
+
+@implementer(IProtocolNegotiationFactory)
+class ClientNegotiationFactory(ClientFactory):
+    """
+    A L{ClientFactory} that has a set of acceptable protocols for NPN/ALPN
+    negotiation.
+    """
+
+    def __init__(self, acceptableProtocols):
+        """
+        Create a L{ClientNegotiationFactory}.
+
+        @param acceptableProtocols: The protocols the client will accept
+            speaking after the TLS handshake is complete.
+        @type acceptableProtocols: L{list} of L{bytes}
+        """
+        self._acceptableProtocols = acceptableProtocols
+
+    def acceptableProtocols(self):
+        """
+        Returns a list of protocols that can be spoken by the connection
+        factory in the form of ALPN tokens, as laid out in the IANA registry
+        for ALPN tokens.
+
+        @return: a list of ALPN tokens in order of preference.
+        @rtype: L{list} of L{bytes}
+        """
+        return self._acceptableProtocols
+
+
+@implementer(IProtocolNegotiationFactory)
+class ServerNegotiationFactory(ServerFactory):
+    """
+    A L{ServerFactory} that has a set of acceptable protocols for NPN/ALPN
+    negotiation.
+    """
+
+    def __init__(self, acceptableProtocols):
+        """
+        Create a L{ServerNegotiationFactory}.
+
+        @param acceptableProtocols: The protocols the server will accept
+            speaking after the TLS handshake is complete.
+        @type acceptableProtocols: L{list} of L{bytes}
+        """
+        self._acceptableProtocols = acceptableProtocols
+
+    def acceptableProtocols(self):
+        """
+        Returns a list of protocols that can be spoken by the connection
+        factory in the form of ALPN tokens, as laid out in the IANA registry
+        for ALPN tokens.
+
+        @return: a list of ALPN tokens in order of preference.
+        @rtype: L{list} of L{bytes}
+        """
+        return self._acceptableProtocols
 
 
 class NPNOrALPNTests(TestCase):
@@ -2572,6 +2642,9 @@ class NPNOrALPNTests(TestCase):
         )
         self.assertIsNone(negotiatedProtocol)
         self.assertEqual(lostReason.type, SSL.Error)
+
+    def test_emptyNegotiate(self) -> None:
+        """ """
 
 
 class ALPNTests(TestCase):
@@ -3042,7 +3115,7 @@ class DiffieHellmanParametersTests(TestCase):
 
     if skipSSL:
         skip = skipSSL
-    filePath = FilePath(b"dh.params")
+        filePath = FilePath(b"dh.params")
 
     def test_fromFile(self):
         """

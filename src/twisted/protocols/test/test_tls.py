@@ -58,7 +58,6 @@ from twisted.internet.interfaces import (
     IHandshakeListener,
     IOpenSSLClientConnectionCreator,
     IOpenSSLServerConnectionCreator,
-    IProtocolNegotiationFactory,
     IPushProducer,
     ISSLTransport,
     ISystemHandle,
@@ -1900,64 +1899,6 @@ class NonStreamingProducerTests(TestCase):
         nsProducer = NonStreamingProducer(consumer)
         streamingProducer = _PullToPush(nsProducer, consumer)
         self.assertTrue(verifyObject(IPushProducer, streamingProducer))
-
-
-@implementer(IProtocolNegotiationFactory)
-class ClientNegotiationFactory(ClientFactory):
-    """
-    A L{ClientFactory} that has a set of acceptable protocols for NPN/ALPN
-    negotiation.
-    """
-
-    def __init__(self, acceptableProtocols):
-        """
-        Create a L{ClientNegotiationFactory}.
-
-        @param acceptableProtocols: The protocols the client will accept
-            speaking after the TLS handshake is complete.
-        @type acceptableProtocols: L{list} of L{bytes}
-        """
-        self._acceptableProtocols = acceptableProtocols
-
-    def acceptableProtocols(self):
-        """
-        Returns a list of protocols that can be spoken by the connection
-        factory in the form of ALPN tokens, as laid out in the IANA registry
-        for ALPN tokens.
-
-        @return: a list of ALPN tokens in order of preference.
-        @rtype: L{list} of L{bytes}
-        """
-        return self._acceptableProtocols
-
-
-@implementer(IProtocolNegotiationFactory)
-class ServerNegotiationFactory(ServerFactory):
-    """
-    A L{ServerFactory} that has a set of acceptable protocols for NPN/ALPN
-    negotiation.
-    """
-
-    def __init__(self, acceptableProtocols):
-        """
-        Create a L{ServerNegotiationFactory}.
-
-        @param acceptableProtocols: The protocols the server will accept
-            speaking after the TLS handshake is complete.
-        @type acceptableProtocols: L{list} of L{bytes}
-        """
-        self._acceptableProtocols = acceptableProtocols
-
-    def acceptableProtocols(self):
-        """
-        Returns a list of protocols that can be spoken by the connection
-        factory in the form of ALPN tokens, as laid out in the IANA registry
-        for ALPN tokens.
-
-        @return: a list of ALPN tokens in order of preference.
-        @rtype: L{list} of L{bytes}
-        """
-        return self._acceptableProtocols
 
 
 class _AggregateSmallWritesTests(SynchronousTestCase):

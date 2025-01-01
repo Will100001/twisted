@@ -14,7 +14,7 @@ from zope.interface import Interface, implementer
 
 from OpenSSL import SSL, crypto
 from OpenSSL._util import lib as pyOpenSSLlib
-from OpenSSL.crypto import X509
+from OpenSSL.crypto import X509, PKey
 from OpenSSL.SSL import VERIFY_FAIL_IF_NO_PEER_CERT, VERIFY_PEER, Connection
 
 import attr
@@ -141,15 +141,14 @@ ProtocolNegotiationSupport.NOSUPPORT = (
 )
 
 
-def protocolNegotiationMechanisms():
+def protocolNegotiationMechanisms() -> FlagConstant:
     """
-    Checks whether your versions of PyOpenSSL and OpenSSL are recent enough to
-    support protocol negotiation, and if they are, what kind of protocol
-    negotiation is supported.
+    Checks whether the installed versions of pyOpenSSL and OpenSSL are recent
+    enough to support protocol negotiation, and if they are, what kind of TLS
+    protocol negotiation (ALPN or NPN) is supported.
 
     @return: A combination of flags from L{ProtocolNegotiationSupport} that
         indicate which mechanisms for protocol negotiation are supported.
-    @rtype: L{constantly.FlagConstant}
     """
     support = ProtocolNegotiationSupport.NOSUPPORT
     ctx = SSL.Context(SSL.SSLv23_METHOD)
@@ -162,7 +161,7 @@ def protocolNegotiationMechanisms():
         support |= ProtocolNegotiationSupport.NPN
 
     try:
-        ctx.set_alpn_select_callback(lambda c: None)
+        ctx.set_alpn_select_callback(lambda connection, protocols: protocols[0])
     except (AttributeError, NotImplementedError):
         pass
     else:
@@ -1269,38 +1268,38 @@ class OpenSSLCertificateOptions:
 
     @_mutuallyExclusiveArguments(
         [
-            ["trustRoot", "requireCertificate"],
-            ["trustRoot", "verify"],
-            ["trustRoot", "caCerts"],
-            ["method", "insecurelyLowerMinimumTo"],
-            ["method", "raiseMinimumTo"],
-            ["raiseMinimumTo", "insecurelyLowerMinimumTo"],
-            ["method", "lowerMaximumSecurityTo"],
+            ("trustRoot", "requireCertificate"),
+            ("trustRoot", "verify"),
+            ("trustRoot", "caCerts"),
+            ("method", "insecurelyLowerMinimumTo"),
+            ("method", "raiseMinimumTo"),
+            ("raiseMinimumTo", "insecurelyLowerMinimumTo"),
+            ("method", "lowerMaximumSecurityTo"),
         ]
     )
     def __init__(
         self,
-        privateKey=None,
-        certificate=None,
-        method=None,
-        verify=False,
-        caCerts=None,
-        verifyDepth=9,
-        requireCertificate=True,
-        verifyOnce=True,
-        enableSingleUseKeys=True,
-        enableSessions=False,
-        fixBrokenPeers=False,
-        enableSessionTickets=False,
-        extraCertChain=None,
-        acceptableCiphers=None,
-        dhParameters=None,
-        trustRoot=None,
-        acceptableProtocols=None,
-        raiseMinimumTo=None,
-        insecurelyLowerMinimumTo=None,
-        lowerMaximumSecurityTo=None,
-    ):
+        privateKey: PKey | None = None,
+        certificate: X509 | None = None,
+        method: int | None = None,
+        verify: bool = False,
+        caCerts: list[X509] | None = None,
+        verifyDepth: int = 9,
+        requireCertificate: bool = True,
+        verifyOnce: bool = True,
+        enableSingleUseKeys: bool = True,
+        enableSessions: bool = False,
+        fixBrokenPeers: bool = False,
+        enableSessionTickets: bool = False,
+        extraCertChain: list[X509] | None = None,
+        acceptableCiphers: IAcceptableCiphers | None = None,
+        dhParameters: OpenSSLDiffieHellmanParameters | None = None,
+        trustRoot: IOpenSSLTrustRoot | None = None,
+        acceptableProtocols: list[bytes] | None = None,
+        raiseMinimumTo: NamedConstant | None = None,
+        insecurelyLowerMinimumTo: NamedConstant | None = None,
+        lowerMaximumSecurityTo: NamedConstant | None = None,
+    ) -> None:
         """
         Create an OpenSSL context SSL connection context factory.
 
@@ -1374,7 +1373,6 @@ class OpenSSLCertificateOptions:
             verification chain if the certificate authority that signed your
             C{certificate} isn't widely supported.  Do I{not} add
             C{certificate} to it.
-        @type extraCertChain: C{list} of L{OpenSSL.crypto.X509}
 
         @param acceptableCiphers: Ciphers that are acceptable for connections.
             Uses a secure default if left L{None}.
@@ -1383,8 +1381,6 @@ class OpenSSLCertificateOptions:
         @param dhParameters: Key generation parameters that are required for
             Diffie-Hellman key exchange.  If this argument is left L{None},
             C{EDH} ciphers are I{disabled} regardless of C{acceptableCiphers}.
-        @type dhParameters: L{DiffieHellmanParameters
-            <twisted.internet.ssl.DiffieHellmanParameters>}
 
         @param trustRoot: Specification of trust requirements of peers.  If
             this argument is specified, the peer is verified.  It requires a
@@ -1396,9 +1392,7 @@ class OpenSSLCertificateOptions:
             those options in combination with this one will raise a
             L{TypeError}.
 
-        @type trustRoot: L{IOpenSSLTrustRoot}
-
-        @param acceptableProtocols: The protocols this peer is willing to speak
+         @param acceptableProtocols: The protocols this peer is willing to speak
             after the TLS negotiation has completed, advertised over both ALPN
             and NPN.  If this argument is specified, and no overlap can be
             found with the other peer, the connection will fail to be
@@ -1584,7 +1578,7 @@ class OpenSSLCertificateOptions:
             self.verify = True
             self.requireCertificate = True
             trustRoot = IOpenSSLTrustRoot(trustRoot)
-        self.trustRoot = trustRoot
+        self.trustRoot: IOpenSSLTrustRoot | None = trustRoot
 
         if acceptableProtocols is not None and not protocolNegotiationMechanisms():
             raise NotImplementedError(
@@ -1627,6 +1621,9 @@ class OpenSSLCertificateOptions:
 
         verifyFlags = SSL.VERIFY_NONE
         if self.verify:
+            assert (
+                self.trustRoot is not None
+            ), "when the verify flag is set, trustRoot must be set"
             verifyFlags = SSL.VERIFY_PEER
             if self.requireCertificate:
                 verifyFlags |= SSL.VERIFY_FAIL_IF_NO_PEER_CERT
@@ -1671,10 +1668,10 @@ class OpenSSLCertificateOptions:
         return ctx
 
 
-OpenSSLCertificateOptions.__getstate__ = deprecated(
+OpenSSLCertificateOptions.__getstate__ = deprecated(  # type:ignore[method-assign]
     Version("Twisted", 15, 0, 0), "a real persistence system"
 )(OpenSSLCertificateOptions.__getstate__)
-OpenSSLCertificateOptions.__setstate__ = deprecated(
+OpenSSLCertificateOptions.__setstate__ = deprecated(  # type:ignore[method-assign]
     Version("Twisted", 15, 0, 0), "a real persistence system"
 )(OpenSSLCertificateOptions.__setstate__)
 
@@ -1948,13 +1945,18 @@ def _setAcceptableProtocols(
 
     @param context: The context which is being set up.
 
-    @param acceptableProtocols: The protocols this peer is willing to speak
-        after the TLS negotiation has completed, advertised over both ALPN and
-        NPN.  If this argument is specified, and no overlap can be found with
-        the other peer, the connection will fail to be established.  If the
-        remote peer does not offer NPN or ALPN, the connection will be
-        established, but no protocol wil be negotiated.  Protocols earlier in
-        the list are preferred over those later in the list.
+    @param acceptableProtocols: The protocols that the host represented by
+        C{context} is willing to speak after TLS negotiation has completed,
+        which will be advertised by connections using this context, over both
+        ALPN and NPN.
+
+        If this argument is specified, and no overlap can be found with the
+        peer on a given connection, TLS negotiation of that connection will
+        fail, and it will not be established.
+
+        If a connection's peer does not offer NPN or ALPN, the connection will
+        be established, but no protocol will be negotiated.  Protocols earlier
+        in the list are preferred over those later in the list.
     """
 
     # If we don't actually have protocols to negotiate, don't set anything up.
