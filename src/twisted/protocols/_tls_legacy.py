@@ -125,7 +125,7 @@ def _convertToAppropriateFactory(
     """
     Upgrade a connection creator / context-factory-ish object into something
     with a signature like the most recent interface for building OpenSSL
-    context objects (L{IOpenSSLClientCreationCreatorFactory}), accounting for
+    context objects (L{IOpenSSLClientConnectionCreatorFactory}), accounting for
     all the various interfaces older versions of Twisted used for context
     configuration.
     """
