@@ -3142,7 +3142,7 @@ class DiffieHellmanParametersTests(TestCase):
 
     if skipSSL:
         skip = skipSSL
-        filePath = FilePath(b"dh.params")
+    filePath = FilePath(b"dh.params")
 
     def test_fromFile(self):
         """
