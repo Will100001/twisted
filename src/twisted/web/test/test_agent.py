@@ -42,7 +42,6 @@ from twisted.python.components import proxyForInterface
 from twisted.python.deprecate import getDeprecationWarningString
 from twisted.python.failure import Failure
 from twisted.test.iosim import FakeTransport, IOPump
-from twisted.test.test_sslverify import certificatesForAuthorityAndServer
 from twisted.trial.unittest import SynchronousTestCase, TestCase
 from twisted.web import client, error, http_headers
 from twisted.web._newclient import (
@@ -100,6 +99,7 @@ else:
     from twisted.internet.ssl import optionsForClientTLS
     from twisted.protocols import tls
     from twisted.protocols.tls import TLSMemoryBIOFactory, TLSMemoryBIOProtocol
+    from twisted.test.test_sslverify import certificatesForAuthorityAndServer
 
     @implementer(IOpenSSLTrustRoot)
     class CustomOpenSSLTrustRoot:

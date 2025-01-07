@@ -28,9 +28,7 @@ from twisted.internet.interfaces import (
     IOpenSSLContextFactory,
     IProtocolNegotiationFactory,
 )
-from twisted.internet.ssl import CertificateOptions
 from twisted.internet.task import Clock
-from twisted.protocols.tls import SomeConnectionCreator
 from twisted.python.compat import nativeString
 from twisted.python.failure import Failure
 from twisted.python.filepath import FilePath
@@ -96,7 +94,11 @@ if not skipSSL:
         optionsForClientTLS,
         platformTrust,
     )
-    from twisted.protocols.tls import TLSMemoryBIOFactory, TLSMemoryBIOProtocol
+    from twisted.protocols.tls import (
+        SomeConnectionCreator,
+        TLSMemoryBIOFactory,
+        TLSMemoryBIOProtocol,
+    )
 
 # A couple of static PEM-format certificates to be used by various tests.
 A_HOST_CERTIFICATE_PEM = """
@@ -448,7 +450,7 @@ def loopbackTLSConnectionInMemory(
     serverCertificate: X509,
     serverProtocols: list[bytes] | None = None,
     clientProtocols: list[bytes] | None = None,
-    clientOptions: type[CertificateOptions] | None = None,
+    clientOptions: type[ssl.CertificateOptions] | None = None,
     protocolsFromFactory: bool = False,
     viaFactory: bool = False,
 ) -> tuple[
@@ -2539,7 +2541,7 @@ class ServiceIdentityTests(SynchronousTestCase):
 def negotiateProtocol(
     serverProtocols: list[bytes],
     clientProtocols: list[bytes],
-    clientOptions: type[CertificateOptions] | None = None,
+    clientOptions: type[ssl.CertificateOptions] | None = None,
     viaFactory: bool = False,
 ) -> tuple[bytes, Failure | None]:
     """
