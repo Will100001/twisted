@@ -22,7 +22,6 @@ from incremental import Version
 
 from twisted.internet import defer, interfaces, protocol, reactor
 from twisted.internet._idna import _idnaText
-from twisted.internet._sslverify import IOpenSSLTrustRoot
 from twisted.internet.address import IPv4Address
 from twisted.internet.error import CertificateError, ConnectionClosed, ConnectionLost
 from twisted.internet.interfaces import (
@@ -92,7 +91,6 @@ else:
 
 if not skipSSL:
     from twisted.internet import _sslverify as sslverify
-    from twisted.internet._sslverify import _verifyCB
     from twisted.internet.ssl import (
         VerificationError,
         optionsForClientTLS,
@@ -398,7 +396,7 @@ def _loopbackTLSConnection(
 
 
 def loopbackTLSConnection(
-    trustRoot: IOpenSSLTrustRoot,
+    trustRoot: sslverify.IOpenSSLTrustRoot,
     privateKeyFile: str,
     chainedCertFile: str | None = None,
 ) -> tuple[
@@ -445,7 +443,7 @@ def loopbackTLSConnection(
 
 
 def loopbackTLSConnectionInMemory(
-    trustRoot: IOpenSSLTrustRoot,
+    trustRoot: sslverify.IOpenSSLTrustRoot,
     privateKey: PKey,
     serverCertificate: X509,
     serverProtocols: list[bytes] | None = None,
@@ -1315,7 +1313,7 @@ class OpenSSLOptionsTests(OpenSSLOptionsTestsMixin, TestCase):
         )
         r = ref(proto)
         # intentional type check failure
-        cb = _verifyCB(proto, True, "just-testing")
+        cb = sslverify._verifyCB(proto, True, "just-testing")
         # consistency check: we still retain a reference.
         self.assertIsNot(r(), None)
         # testing internal bug-reporting here, so we intentionally break its
