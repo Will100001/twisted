@@ -86,7 +86,7 @@ else:
         trustRootFromCertificates,
     )
     from twisted.protocols._sni import (
-        ServerNameIndictionConfiguration,
+        ServerNameIndicationConfiguration,
         TLSServerEndpoint,
         autoReloadingDirectoryOfPEMs,
     )
@@ -2421,7 +2421,7 @@ class _TLSServerEndpointParser:
         p = FilePath(path)
         return TLSServerEndpoint(
             TCP6ServerEndpoint(reactor, int(port), int(backlog), interface),
-            ServerNameIndictionConfiguration(autoReloadingDirectoryOfPEMs(p)),
+            ServerNameIndicationConfiguration(autoReloadingDirectoryOfPEMs(p)),
         )
 
     def parseStreamServer(

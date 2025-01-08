@@ -38,7 +38,7 @@ log = Logger()
 @implementer(IOpenSSLServerConnectionCreator)
 @dataclass
 class SNIConnectionCreator(object):
-    _configForSNI: ServerNameIndictionConfiguration
+    _configForSNI: ServerNameIndicationConfiguration
     _connectionSetupHook: Callable[[Connection], None]
     _contextSetupHook: Callable[[Context], None]
 
@@ -93,9 +93,9 @@ LookerUpper = Callable[[Optional[bytes]], Optional[Context]]
 
 @implementer(IOpenSSLServerConnectionCreatorFactory)
 @dataclass
-class ServerNameIndictionConfiguration:
+class ServerNameIndicationConfiguration:
     """
-    L{ServerNameIndictionConfiguration} is an
+    L{ServerNameIndicationConfiguration} is an
     L{IOpenSSLServerConnectionCreatorFactory} that creates server connections
     according to a lookup function that can translate a server name specified
     by a client into a L{Context}.
@@ -110,7 +110,7 @@ class ServerNameIndictionConfiguration:
     ) -> IOpenSSLServerConnectionCreator:
         """
         Create an L{SNIConnectionCreator} configured with the C{contextLookup}
-        passed to this L{ServerNameIndictionConfiguration} when it was
+        passed to this L{ServerNameIndicationConfiguration} when it was
         constructed.
         """
         return SNIConnectionCreator(self, connectionSetupHook, contextSetupHook)

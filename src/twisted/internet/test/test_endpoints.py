@@ -110,7 +110,7 @@ try:
         optionsForClientTLS,
     )
     from twisted.protocols._sni import (
-        ServerNameIndictionConfiguration,
+        ServerNameIndicationConfiguration,
         SNIConnectionCreator,
     )
     from twisted.protocols.tls import TLSMemoryBIOFactory
@@ -2988,7 +2988,7 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
         from twisted.internet.endpoints import autoReloadingDirectoryOfPEMs
 
         fp = FilePath(self.mktemp())
-        snic = ServerNameIndictionConfiguration(autoReloadingDirectoryOfPEMs(fp))
+        snic = ServerNameIndicationConfiguration(autoReloadingDirectoryOfPEMs(fp))
 
         class FactoryChecker:
             def __eq__(iself, other: object) -> bool:
@@ -3358,7 +3358,7 @@ class ServerStringTests(unittest.TestCase):
         self.assertEqual(subendpoint._backlog, 12)
         self.assertEqual(subendpoint._interface, "10.0.0.1")
         ctx = server.contextFactory
-        self.assertIsInstance(ctx, endpoints.ServerNameIndictionConfiguration)
+        self.assertIsInstance(ctx, endpoints.ServerNameIndicationConfiguration)
         sc: SNIConnectionCreator = ctx.createServerCreator(
             lambda con: None,
             lambda ctx: None,
