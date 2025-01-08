@@ -8,7 +8,7 @@ Tests for L{twisted.protocols.tls}.
 from __future__ import annotations
 
 import gc
-from typing import Union
+from typing import Any, Union
 
 from zope.interface import Interface, directlyProvides, implementer
 from zope.interface.verify import verifyObject
@@ -19,6 +19,7 @@ from twisted.internet import reactor
 from twisted.internet.interfaces import IOpenSSLContextFactory
 from twisted.internet.task import Clock, deferLater
 from twisted.python.compat import iterbytes
+from twisted.test.iosim import IOPump
 
 try:
     from OpenSSL import crypto
@@ -237,8 +238,8 @@ class TLSMemoryBIOFactoryTests(TestCase):
 
 
 def handshakingClientAndServer(
-    clientGreetingData=None, clientAbortAfterHandshake=False
-):
+    clientGreetingData: bytes | None = None, clientAbortAfterHandshake: bool = False
+) -> tuple[TLSMemoryBIOProtocol, TLSMemoryBIOProtocol, IOPump]:
     """
     Construct a client and server L{TLSMemoryBIOProtocol} connected by an IO
     pump.
@@ -310,7 +311,7 @@ class DeterministicTLSMemoryBIOTests(SynchronousTestCase):
         L{connectedServerAndClient}, rather than returning L{Deferred}s.
     """
 
-    def test_handshakeNotification(self):
+    def test_handshakeNotification(self) -> None:
         """
         The completion of the TLS handshake calls C{handshakeCompleted} on
         L{Protocol} objects that provide L{IHandshakeListener}.  At the time
@@ -318,14 +319,16 @@ class DeterministicTLSMemoryBIOTests(SynchronousTestCase):
         have been initialized.
         """
         client, server, pump = handshakingClientAndServer()
-        self.assertEqual(client.wrappedProtocol.handshook, False)
-        self.assertEqual(server.wrappedProtocol.handshaked, False)
+        wrappedClient: Any = client.wrappedProtocol
+        wrappedServer: Any = server.wrappedProtocol
+        self.assertEqual(wrappedClient.handshook, False)
+        self.assertEqual(wrappedServer.handshaked, False)
         pump.flush()
-        self.assertEqual(client.wrappedProtocol.handshook, True)
-        self.assertEqual(server.wrappedProtocol.handshaked, True)
-        self.assertIsNot(client.wrappedProtocol.peerAfterHandshake, None)
+        self.assertEqual(wrappedClient.handshook, True)
+        self.assertEqual(wrappedServer.handshaked, True)
+        self.assertIsNot(wrappedClient.peerAfterHandshake, None)
 
-    def test_handshakeStopWriting(self):
+    def test_handshakeStopWriting(self) -> None:
         """
         If some data is written to the transport in C{connectionMade}, but
         C{handshakeDone} doesn't like something it sees about the handshake, it
@@ -333,18 +336,18 @@ class DeterministicTLSMemoryBIOTests(SynchronousTestCase):
         receives that data.
         """
         client, server, pump = handshakingClientAndServer(b"untrustworthy", True)
-        wrappedServerProtocol = server.wrappedProtocol
+        wrappedServerProtocol: Any = server.wrappedProtocol
         pump.flush()
         self.assertEqual(wrappedServerProtocol.received, [])
 
-    def test_smalWriteBuffering(self):
+    def test_smallWriteBuffering(self) -> None:
         """
         If a small amount data is written to the TLS transport, it is only
         delivered if time passes, indicating small-write buffering is in
         effect.
         """
         client, server, pump = handshakingClientAndServer()
-        wrappedServerProtocol = server.wrappedProtocol
+        wrappedServerProtocol: Any = server.wrappedProtocol
         pump.flush()
         self.assertEqual(wrappedServerProtocol.received, [])
         client.write(b"hel")
@@ -362,7 +365,7 @@ class TLSMemoryBIOTests(TestCase):
     L{ITransport}.
     """
 
-    def test_interfaces(self):
+    def test_interfaces(self) -> None:
         """
         L{TLSMemoryBIOProtocol} instances provide L{ISSLTransport} and
         L{ISystemHandle}.
@@ -371,7 +374,7 @@ class TLSMemoryBIOTests(TestCase):
         self.assertTrue(ISSLTransport.providedBy(proto))
         self.assertTrue(ISystemHandle.providedBy(proto))
 
-    def test_wrappedProtocolInterfaces(self):
+    def test_wrappedProtocolInterfaces(self) -> None:
         """
         L{TLSMemoryBIOProtocol} instances provide the interfaces provided by
         the transport they wrap.
@@ -394,7 +397,7 @@ class TLSMemoryBIOTests(TestCase):
         tlsProtocol.makeConnection(transport)
         self.assertTrue(ITransport.providedBy(tlsProtocol))
 
-    def test_getHandle(self):
+    def test_getHandle(self) -> None:
         """
         L{TLSMemoryBIOProtocol.getHandle} returns the L{OpenSSL.SSL.Connection}
         instance it uses to actually implement TLS.
@@ -417,7 +420,7 @@ class TLSMemoryBIOTests(TestCase):
         proto.makeConnection(transport)
         self.assertIsInstance(proto.getHandle(), Connection)
 
-    def test_makeConnection(self):
+    def test_makeConnection(self) -> None:
         """
         When L{TLSMemoryBIOProtocol} is connected to a transport, it connects
         the protocol it wraps to a transport.
@@ -437,7 +440,7 @@ class TLSMemoryBIOTests(TestCase):
         self.assertIsNot(clientProtocol.transport, transport)
         self.assertIs(clientProtocol.transport, sslProtocol)
 
-    def handshakeProtocols(self):
+    def handshakeProtocols(self) -> tuple[object, object, Deferred[None], object]:
         """
         Start handshake between TLS client and server.
         """
@@ -466,7 +469,7 @@ class TLSMemoryBIOTests(TestCase):
             connectionDeferred,
         )
 
-    def test_handshake(self):
+    def test_handshake(self) -> Deferred[None]:
         """
         The TLS handshake is performed when L{TLSMemoryBIOProtocol} is
         connected to a transport.
@@ -477,13 +480,13 @@ class TLSMemoryBIOTests(TestCase):
         # important here.
         return handshakeDeferred
 
-    def test_handshakeFailure(self):
+    def test_handshakeFailure(self) -> Deferred[list[Any]]:
         """
         L{TLSMemoryBIOProtocol} reports errors in the handshake process to the
         application-level protocol object using its C{connectionLost} method
         and disconnects the underlying transport.
         """
-        clientConnectionLost = Deferred()
+        clientConnectionLost: Deferred[None] = Deferred()
         clientFactory = ClientFactory()
         clientFactory.protocol = lambda: ConnectionLostNotifyingProtocol(
             clientConnectionLost
@@ -493,7 +496,7 @@ class TLSMemoryBIOTests(TestCase):
         wrapperFactory = TLSMemoryBIOFactory(clientContextFactory, True, clientFactory)
         sslClientProtocol = wrapperFactory.buildProtocol(None)
 
-        serverConnectionLost = Deferred()
+        serverConnectionLost: Deferred[None] = Deferred()
         serverFactory = ServerFactory()
         serverFactory.protocol = lambda: ConnectionLostNotifyingProtocol(
             serverConnectionLost
