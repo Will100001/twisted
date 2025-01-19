@@ -282,6 +282,8 @@ def handshakingClientAndServer(
             pass
 
     clientF = TLSMemoryBIOFactory(
+        # TODO: client TLS probably wants a custom hostname so we can validate
+        # that more than one gets picked up
         optionsForClientTLS("example.com", trustRoot=authCert),
         isClient=True,
         wrappedFactory=ClientFactory.forProtocol(lambda: Client(999999)),
@@ -293,6 +295,7 @@ def handshakingClientAndServer(
         wrappedFactory=ServerFactory.forProtocol(lambda: Server(999999)),
         clock=clock,
     )
+    # maybe I just want to use connectedServerAndClient directly if I'm customizing all this stuff
     client, server, pump = connectedServerAndClient(
         lambda: serverF.buildProtocol(None),
         lambda: clientF.buildProtocol(None),
