@@ -2,13 +2,13 @@
 # Copyright (c) Twisted Matrix Laboratories.
 # See LICENSE for details.
 """
-tls_alpn_npn_server
+tls_alpn_server
 ~~~~~~~~~~~~~~~~~~~
 
 This test script demonstrates the usage of the acceptableProtocols API as a
 server peer.
 
-It performs next protocol negotiation using NPN and ALPN.
+It performs next protocol negotiation using ALPN.
 
 It will print what protocol was negotiated for each connection that is made to
 it.
@@ -30,7 +30,7 @@ To test this, use OpenSSL's s_client command, with either or both of the
     openssl s_client -connect localhost:8080 -alpn h2,http/1.1
     openssl s_client -connect localhost:8080 -nextprotoneg h2,http/1.1
 
-Alternatively, use the tls_alpn_npn_client.py script found in the examples
+Alternatively, use the tls_alpn_client.py script found in the examples
 directory.
 """
 
@@ -56,7 +56,7 @@ ACCEPTABLE_PROTOCOLS = [b"h2", b"http/1.1"]
 LISTEN_PORT = 8080
 
 
-class NPNPrinterProtocol(Protocol):
+class PrinterProtocol(Protocol):
     """
     This protocol accepts incoming connections and waits for data. When
     received, it prints what the negotiated protocol is, echoes the data back,
@@ -84,7 +84,7 @@ class NPNPrinterProtocol(Protocol):
 
 class ResponderFactory(Factory):
     def buildProtocol(self, addr):
-        return NPNPrinterProtocol()
+        return PrinterProtocol()
 
 
 privateKeyData = FilePath("server-key.pem").getContent()

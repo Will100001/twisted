@@ -119,11 +119,15 @@ def _usablePyOpenSSL(version):
 class ProtocolNegotiationSupport(Flags):
     """
     L{ProtocolNegotiationSupport} defines flags which are used to indicate the
-    level of NPN/ALPN support provided by the TLS backend.
+    level of ALPN support provided by the TLS backend.
 
-    @cvar NOSUPPORT: There is no support for NPN or ALPN. This is exclusive
-        with both L{NPN} and L{ALPN}.
-    @cvar NPN: The implementation supports Next Protocol Negotiation.
+    @cvar NOSUPPORT: There is no support for ALPN.  This is exclusive with
+        L{ALPN}.
+
+    @cvar NPN: The implementation supports Next Protocol Negotiation.  (This
+        flag is provided for compatibility only; Twisted no longer supports
+        Next Protocol Negotiation)
+
     @cvar ALPN: The implementation supports Application Layer Protocol
         Negotiation.
     """
@@ -143,22 +147,14 @@ ProtocolNegotiationSupport.NOSUPPORT = (
 
 def protocolNegotiationMechanisms() -> FlagConstant:
     """
-    Checks whether the installed versions of pyOpenSSL and OpenSSL are recent
-    enough to support protocol negotiation, and if they are, what kind of TLS
-    protocol negotiation (ALPN or NPN) is supported.
+    Check whether the installed versions of pyOpenSSL and OpenSSL are recent
+    enough to support ALPN.
 
     @return: A combination of flags from L{ProtocolNegotiationSupport} that
         indicate which mechanisms for protocol negotiation are supported.
     """
     support = ProtocolNegotiationSupport.NOSUPPORT
     ctx = SSL.Context(SSL.SSLv23_METHOD)
-
-    try:
-        ctx.set_npn_advertise_callback(lambda c: None)
-    except (AttributeError, NotImplementedError):
-        pass
-    else:
-        support |= ProtocolNegotiationSupport.NPN
 
     try:
         ctx.set_alpn_select_callback(lambda connection, protocols: protocols[0])
@@ -1170,7 +1166,7 @@ def optionsForClientTLS(
 
     @since: 14.0
 
-    @param hostname: The expected name of the remote host. This serves two
+    @param hostname: The expected name of the remote host.  This serves two
         purposes: first, and most importantly, it verifies that the certificate
         received from the server correctly identifies the specified hostname.
         The second purpose is to use the U{Server Name Indication extension
@@ -1178,32 +1174,32 @@ def optionsForClientTLS(
         the server which certificate should be used.
     @type hostname: L{unicode}
 
-    @param trustRoot: Specification of trust requirements of peers. This may be
-        a L{Certificate} or the result of L{platformTrust}. By default it is
-        L{platformTrust} and you probably shouldn't adjust it unless you really
-        know what you're doing. Be aware that clients using this interface
-        I{must} verify the server; you cannot explicitly pass L{None} since
-        that just means to use L{platformTrust}.
+    @param trustRoot: Specification of trust requirements of peers.  This may
+        be a L{Certificate} or the result of L{platformTrust}.  By default it
+        is L{platformTrust} and you probably shouldn't adjust it unless you
+        really know what you're doing.  Be aware that clients using this
+        interface I{must} verify the server; you cannot explicitly pass L{None}
+        since that just means to use L{platformTrust}.
     @type trustRoot: L{IOpenSSLTrustRoot}
 
     @param clientCertificate: The certificate and private key that the client
-        will use to authenticate to the server. If unspecified, the client will
-        not authenticate.
+        will use to authenticate to the server.  If unspecified, the client
+        will not authenticate.
     @type clientCertificate: L{PrivateCertificate}
 
     @param acceptableProtocols: The protocols this peer is willing to speak
-        after the TLS negotiation has completed, advertised over both ALPN and
-        NPN. If this argument is specified, and no overlap can be found with
-        the other peer, the connection will fail to be established. If the
-        remote peer does not offer NPN or ALPN, the connection will be
-        established, but no protocol wil be negotiated. Protocols earlier in
-        the list are preferred over those later in the list.
+        after the TLS negotiation has completed, advertised over ALPN.  If this
+        argument is specified, and no overlap can be found with the other peer,
+        the connection will fail to be established.  If the remote peer does
+        not offer ALPN, the connection will be established, but no protocol wil
+        be negotiated.  Protocols earlier in the list are preferred over those
+        later in the list.
     @type acceptableProtocols: L{list} of L{bytes}
 
-    @param extraCertificateOptions: A dictionary of additional keyword arguments
-        to be presented to L{CertificateOptions}. Please avoid using this unless
-        you absolutely need to; any time you need to pass an option here that is
-        a bug in this interface.
+    @param extraCertificateOptions: A dictionary of additional keyword
+        arguments to be presented to L{CertificateOptions}.  Please avoid using
+        this unless you absolutely need to; any time you need to pass an option
+        here that is a bug in this interface.
     @type extraCertificateOptions: L{dict}
 
     @return: A client connection creator.
@@ -1392,14 +1388,13 @@ class OpenSSLCertificateOptions:
             those options in combination with this one will raise a
             L{TypeError}.
 
-         @param acceptableProtocols: The protocols this peer is willing to speak
-            after the TLS negotiation has completed, advertised over both ALPN
-            and NPN.  If this argument is specified, and no overlap can be
-            found with the other peer, the connection will fail to be
-            established.  If the remote peer does not offer NPN or ALPN, the
-            connection will be established, but no protocol wil be negotiated.
-            Protocols earlier in the list are preferred over those later in the
-            list.
+        @param acceptableProtocols: The protocols this peer is willing to speak
+            after the TLS negotiation has completed, advertised over ALPN.  If
+            this argument is specified, and no overlap can be found with the
+            other peer, the connection will fail to be established.  If the
+            remote peer does not offer ALPN, the connection will be
+            established, but no protocol wil be negotiated.  Protocols earlier
+            in the list are preferred over those later in the list.
         @type acceptableProtocols: L{list} of L{bytes}
 
         @param raiseMinimumTo: The minimum TLS version that you want to use, or
@@ -1661,8 +1656,8 @@ class OpenSSLCertificateOptions:
         self._ecChooser.configureECDHCurve(ctx)
 
         if self._acceptableProtocols:
-            # Try to set NPN and ALPN. _acceptableProtocols cannot be set by
-            # the constructor unless at least one mechanism is supported.
+            # Try to set ALPN. _acceptableProtocols cannot be set by the
+            # constructor unless at least one mechanism is supported.
             _setAcceptableProtocols(ctx, self._acceptableProtocols)
 
         return ctx
@@ -1946,8 +1941,8 @@ def _makeSelectionCallback(
 
     def protoSelectCallback(conn: Connection, protocols: list[bytes]) -> bytes:
         """
-        NPN client-side and ALPN server-side callback used to select the next
-        protocol.  Prefers protocols found earlier in C{_acceptableProtocols}.
+        ALPN server-side callback used to select the next protocol.  Prefers
+        protocols found earlier in C{_acceptableProtocols}.
 
         @param conn: The L{Connection} that is being established.
 
@@ -1961,8 +1956,9 @@ def _makeSelectionCallback(
             if p in overlap:
                 return p
         else:
-            # TODO: I think this should really be OPENSSL_NPN_NO_OVERLAP, which
-            # is exposed by pyOpenSSL as OpenSSL.SSL.NO_OVERLAPPING_PROTOCOLS
+            # TODO: I think this should really be
+            # OpenSSL.SSL.NO_OVERLAPPING_PROTOCOLS which is a Python-specific
+            # sentinel object exposed by pyOpenSSL
             return b""
 
     return protoSelectCallback
@@ -1972,23 +1968,21 @@ def _setAcceptableProtocols(
     context: SSL.Context, acceptableProtocols: list[bytes]
 ) -> None:
     """
-    Called to set up the L{OpenSSL.SSL.Context} for doing NPN and/or ALPN
-    negotiation.
+    Called to set up the L{OpenSSL.SSL.Context} for doing ALPN negotiation.
 
     @param context: The context which is being set up.
 
     @param acceptableProtocols: The protocols that the host represented by
         C{context} is willing to speak after TLS negotiation has completed,
-        which will be advertised by connections using this context, over both
-        ALPN and NPN.
+        which will be advertised by connections using this context, over ALPN.
 
         If this argument is specified, and no overlap can be found with the
         peer on a given connection, TLS negotiation of that connection will
         fail, and it will not be established.
 
-        If a connection's peer does not offer NPN or ALPN, the connection will
-        be established, but no protocol will be negotiated.  Protocols earlier
-        in the list are preferred over those later in the list.
+        If a connection's peer does not offer ALPN, the connection will be
+        established, but no protocol will be negotiated.  Protocols earlier in
+        the list are preferred over those later in the list.
     """
 
     # If we don't actually have protocols to negotiate, don't set anything up.
@@ -1999,17 +1993,6 @@ def _setAcceptableProtocols(
         return
 
     supported = protocolNegotiationMechanisms()
-
-    # Note: it does not actually make sense to set both advertise / select
-    # callbacks in NPN or select/protos in ALPN on the *same* context, as one
-    # of these is for servers and one is for clients.
-    if supported & ProtocolNegotiationSupport.NPN:
-
-        def npnAdvertiseCallback(conn: Connection) -> list[bytes]:
-            return acceptableProtocols
-
-        context.set_npn_advertise_callback(npnAdvertiseCallback)
-        context.set_npn_select_callback(_makeSelectionCallback(acceptableProtocols))
 
     if supported & ProtocolNegotiationSupport.ALPN:
         context.set_alpn_select_callback(_makeSelectionCallback(acceptableProtocols))

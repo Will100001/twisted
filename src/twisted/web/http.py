@@ -3115,16 +3115,15 @@ class _GenericHTTPChannelProtocol(proxyForInterface(IProtocol, "_channel")):  # 
     A proxy object that wraps one of the HTTP protocol objects, and switches
     between them depending on TLS negotiated protocol.
 
-    @ivar _negotiatedProtocol: The protocol negotiated with ALPN or NPN, if
-        any.
+    @ivar _negotiatedProtocol: The protocol negotiated with ALPN, if any.
     @type _negotiatedProtocol: Either a bytestring containing the ALPN token
         for the negotiated protocol, or L{None} if no protocol has yet been
         negotiated.
 
     @ivar _channel: The object capable of behaving like a L{HTTPChannel} that
-        is backing this object. By default this is a L{HTTPChannel}, but if a
+        is backing this object.  By default this is a L{HTTPChannel}, but if a
         HTTP protocol upgrade takes place this may be a different channel
-        object. Must implement L{IProtocol}.
+        object.  Must implement L{IProtocol}.
     @type _channel: L{HTTPChannel}
 
     @ivar _requestFactory: A callable to use to build L{IRequest} objects.

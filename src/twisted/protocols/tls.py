@@ -561,31 +561,14 @@ class TLSMemoryBIOProtocol(ProtocolWrapper):
         return self._tlsConnection.get_peer_certificate()
 
     @property
-    def negotiatedProtocol(self):
+    def negotiatedProtocol(self) -> bytes | None:
         """
         @see: L{INegotiated.negotiatedProtocol}
         """
-        protocolName = None
-
-        try:
-            # If ALPN is not implemented that's ok, NPN might be.
-            protocolName = self._tlsConnection.get_alpn_proto_negotiated()
-        except (NotImplementedError, AttributeError):
-            pass
-
-        if protocolName not in (b"", None):
-            # A protocol was selected using ALPN.
-            return protocolName
-
-        try:
-            protocolName = self._tlsConnection.get_next_proto_negotiated()
-        except (NotImplementedError, AttributeError):
-            pass
-
-        if protocolName != b"":
-            return protocolName
-
-        return None
+        protocolName: bytes | None = self._tlsConnection.get_alpn_proto_negotiated()
+        if protocolName == b"":
+            return None
+        return protocolName
 
     def registerProducer(self, producer, streaming):
         # If we've already disconnected, nothing to do here:

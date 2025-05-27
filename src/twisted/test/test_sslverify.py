@@ -13,7 +13,6 @@ import gc
 import itertools
 import textwrap
 from dataclasses import dataclass
-from unittest import skipIf
 from weakref import ref
 
 from zope.interface import implementer
@@ -39,9 +38,6 @@ from twisted.trial import util
 from twisted.trial.unittest import SkipTest, SynchronousTestCase, TestCase
 
 skipSSL = ""
-skipSNI = ""
-skipNPN = ""
-skipALPN = ""
 
 if requireModule("OpenSSL"):
     import ipaddress
@@ -66,26 +62,8 @@ if requireModule("OpenSSL"):
     from twisted.internet import ssl
     from twisted.protocols._sni import PEMObjects
     from ._ca_with_intermediate import createCA, createIntermediate, createLeaf
-
-    try:
-        ctx = SSL.Context(SSL.SSLv23_METHOD)
-        ctx.set_npn_advertise_callback(lambda c: None)
-    except (NotImplementedError, AttributeError):
-        skipNPN = (
-            "NPN is deprecated (and OpenSSL 1.0.1 or greater required for NPN"
-            " support)"
-        )
-
-    try:
-        ctx = SSL.Context(SSL.SSLv23_METHOD)
-        ctx.set_alpn_select_callback(lambda c: None)  # type: ignore[misc,arg-type]
-    except NotImplementedError:
-        skipALPN = "OpenSSL 1.0.2 or greater required for ALPN support"
 else:
     skipSSL = "OpenSSL is required for SSL tests."
-    skipSNI = skipSSL
-    skipNPN = skipSSL
-    skipALPN = skipSSL
 
 if not skipSSL:
     from twisted.internet import _sslverify as sslverify
@@ -311,7 +289,7 @@ class ListeningClient(protocol.Protocol):
 @implementer(IProtocolNegotiationFactory)
 class IPNFactory(protocol.Factory):
     """
-    A L{ClientFactory} that has a set of acceptable protocols for NPN/ALPN
+    A L{ClientFactory} that has a set of acceptable protocols for ALPN
     negotiation.
     """
 
@@ -457,7 +435,7 @@ def loopbackTLSConnectionInMemory(
     TLSMemoryBIOProtocol, TLSMemoryBIOProtocol, GreetingServer, ListeningClient, IOPump
 ]:
     """
-    Create a loopback TLS connection with the given trust and keys. Like
+    Create a loopback TLS connection with the given trust and keys.  Like
     L{loopbackTLSConnection}, but using in-memory certificates and keys rather
     than writing them to disk.
 
@@ -469,16 +447,17 @@ def loopbackTLSConnectionInMemory(
     @type privateKey: L{str} (native string)
 
     @param serverCertificate: The certificate used by the server.
+
     @type chainedCertFile: L{str} (native string)
 
     @param clientProtocols: The protocols the client is willing to negotiate
-        using NPN/ALPN.
+        using ALPN.
 
     @param serverProtocols: The protocols the server is willing to negotiate
-        using NPN/ALPN.
+        using ALPN.
 
-    @param clientOptions: The type of C{OpenSSLCertificateOptions} class to
-        use for the client. Defaults to C{OpenSSLCertificateOptions}.
+    @param clientOptions: The type of C{OpenSSLCertificateOptions} class to use
+        for the client.  Defaults to C{OpenSSLCertificateOptions}.
 
     @return: 3-tuple of server-protocol, client-protocol, and L{IOPump}
     @rtype: L{tuple}
@@ -2490,7 +2469,6 @@ class ServiceIdentityTests(SynchronousTestCase):
         self.assertIsInstance(cErr, SSL.Error)
         self.assertIsInstance(sErr, SSL.Error)
 
-    @skipIf(skipSNI, skipSNI)
     def test_hostnameIsIndicated(self):
         """
         Specifying the C{hostname} argument to L{CertificateOptions} also sets
@@ -2511,7 +2489,6 @@ class ServiceIdentityTests(SynchronousTestCase):
         )
         self.assertEqual(names, ["valid.example.com"])
 
-    @skipIf(skipSNI, skipSNI)
     def test_hostnameEncoding(self):
         """
         Hostnames are encoded as IDNA.
@@ -2543,7 +2520,7 @@ def negotiateProtocol(
     clientProtocols: list[bytes],
     clientOptions: type[ssl.CertificateOptions] | None = None,
     viaFactory: bool = False,
-) -> tuple[bytes, Failure | None]:
+) -> tuple[bytes | None, Failure | None]:
     """
     Create the TLS connection and negotiate a next protocol.
 
@@ -2577,99 +2554,16 @@ def negotiateProtocol(
     return (cProto.negotiatedProtocol, cWrapped.lostReason)
 
 
-class NPNOrALPNTests(TestCase):
-    """
-    NPN and ALPN protocol selection.
-
-    These tests only run on platforms that have a PyOpenSSL version >= 0.15,
-    and OpenSSL version 1.0.1 or later.
-    """
-
-    if skipSSL:
-        skip = skipSSL
-    elif skipNPN:
-        skip = skipNPN
-
-    def test_nextProtocolMechanismsNPNIsSupported(self) -> None:
-        """
-        When at least NPN is available on the platform, NPN is in the set of
-        supported negotiation protocols.
-        """
-        supportedProtocols = sslverify.protocolNegotiationMechanisms()
-        self.assertTrue(sslverify.ProtocolNegotiationSupport.NPN in supportedProtocols)
-
-    def test_NPNAndALPNSuccess(self) -> None:
-        """
-        When both ALPN and NPN are used, and both the client and server have
-        overlapping protocol choices, a protocol is successfully negotiated.
-        Further, the negotiated protocol is the first one in the list.
-        """
-        protocols = [b"h2", b"http/1.1"]
-        negotiatedProtocol, lostReason = negotiateProtocol(
-            clientProtocols=protocols,
-            serverProtocols=protocols,
-        )
-        self.assertEqual(negotiatedProtocol, b"h2")
-        self.assertIsNone(lostReason)
-
-    def test_NPNAndALPNDifferent(self) -> None:
-        """
-        Client and server have different protocol lists: only the common
-        element is chosen.
-        """
-        serverProtocols = [b"h2", b"http/1.1", b"spdy/2"]
-        clientProtocols = [b"spdy/3", b"http/1.1"]
-        negotiatedProtocol, lostReason = negotiateProtocol(
-            clientProtocols=clientProtocols,
-            serverProtocols=serverProtocols,
-        )
-        self.assertEqual(negotiatedProtocol, b"http/1.1")
-        self.assertIsNone(lostReason)
-
-    def test_NPNAndALPNNoAdvertise(self) -> None:
-        """
-        When one peer does not advertise any protocols, the connection is set
-        up with no next protocol.
-        """
-        protocols = [b"h2", b"http/1.1"]
-        negotiatedProtocol, lostReason = negotiateProtocol(
-            clientProtocols=protocols,
-            serverProtocols=[],
-        )
-        self.assertIsNone(negotiatedProtocol)
-        self.assertIsNone(lostReason)
-
-    def test_NPNAndALPNNoOverlap(self) -> None:
-        """
-        When the client and server have no overlap of protocols, the connection
-        fails.
-        """
-        clientProtocols = [b"h2", b"http/1.1"]
-        serverProtocols = [b"spdy/3"]
-        negotiatedProtocol, lostReason = negotiateProtocol(
-            serverProtocols=clientProtocols,
-            clientProtocols=serverProtocols,
-        )
-        self.assertIsNone(negotiatedProtocol)
-        assert lostReason is not None, "connection should have completed"
-        self.assertEqual(lostReason.type, SSL.Error)
-
-
 class ALPNTests(TestCase):
     """
     ALPN protocol selection.
 
     These tests only run on platforms that have a PyOpenSSL version >= 0.15,
     and OpenSSL version 1.0.2 or later.
-
-    This covers only the ALPN specific logic, as any platform that has ALPN
-    will also have NPN and so will run the NPNAndALPNTest suite as well.
     """
 
     if skipSSL:
         skip = skipSSL
-    elif skipALPN:
-        skip = skipALPN
 
     def test_nextProtocolMechanismsALPNIsSupported(self):
         """
@@ -2708,57 +2602,6 @@ class ALPNTests(TestCase):
         )
         self.assertIs(negotiatedProtocol, None)
         self.assertIs(lostReason, None)
-
-
-class NPNAndALPNAbsentTests(TestCase):
-    """
-    NPN/ALPN operations fail on platforms that do not support them.
-
-    These tests only run on platforms that have a PyOpenSSL version < 0.15,
-    an OpenSSL version earlier than 1.0.1, or an OpenSSL/cryptography built
-    without NPN support.
-    """
-
-    if skipSSL:
-        skip = skipSSL
-    elif not skipNPN or not skipALPN:
-        skip = "NPN and/or ALPN is present on this platform"
-
-    def test_nextProtocolMechanismsNoNegotiationSupported(self):
-        """
-        When neither NPN or ALPN are available on a platform, there are no
-        supported negotiation protocols.
-        """
-        supportedProtocols = sslverify.protocolNegotiationMechanisms()
-        self.assertFalse(supportedProtocols)
-
-    def test_NPNAndALPNNotImplemented(self):
-        """
-        A NotImplementedError is raised when using acceptableProtocols on a
-        platform that does not support either NPN or ALPN.
-        """
-        protocols = [b"h2", b"http/1.1"]
-        self.assertRaises(
-            NotImplementedError,
-            negotiateProtocol,
-            serverProtocols=protocols,
-            clientProtocols=protocols,
-        )
-
-    def test_NegotiatedProtocolReturnsNone(self):
-        """
-        negotiatedProtocol return L{None} even when NPN/ALPN aren't supported.
-        This works because, as neither are supported, negotiation isn't even
-        attempted.
-        """
-        serverProtocols = None
-        clientProtocols = None
-        negotiatedProtocol, lostReason = negotiateProtocol(
-            clientProtocols=clientProtocols,
-            serverProtocols=serverProtocols,
-        )
-        self.assertIsNone(negotiatedProtocol)
-        self.assertIsNone(lostReason)
 
 
 class _NotSSLTransport:
