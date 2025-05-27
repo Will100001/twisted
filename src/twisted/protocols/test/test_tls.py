@@ -238,16 +238,18 @@ class TLSMemoryBIOFactoryTests(TestCase):
 
 
 def handshakingClientAndServer(
-    clientGreetingData: bytes | None = None, clientAbortAfterHandshake: bool = False
+    clientGreetingData: bytes | None = None,
+    clientAbortAfterHandshake: bool = False,
+    hostname: str = "example.com",
 ) -> tuple[TLSMemoryBIOProtocol, TLSMemoryBIOProtocol, IOPump]:
     """
     Construct a client and server L{TLSMemoryBIOProtocol} connected by an IO
     pump.
 
     @param greetingData: The data which should be written in L{connectionMade}.
-    @type greetingData: L{bytes}
 
-    @return: 3-tuple of client, server, L{twisted.test.iosim.IOPump}
+    @return: 3-tuple of client protocol, server protocol, and a L{pump
+        <twisted.test.iosim.IOPump>} that can move the data between the two
     """
     authCert, serverCert = certificatesForAuthorityAndServer()
     clock = Clock()
@@ -284,7 +286,7 @@ def handshakingClientAndServer(
     clientF = TLSMemoryBIOFactory(
         # TODO: client TLS probably wants a custom hostname so we can validate
         # that more than one gets picked up
-        optionsForClientTLS("example.com", trustRoot=authCert),
+        optionsForClientTLS(hostname, trustRoot=authCert),
         isClient=True,
         wrappedFactory=ClientFactory.forProtocol(lambda: Client(999999)),
         clock=clock,
@@ -295,7 +297,6 @@ def handshakingClientAndServer(
         wrappedFactory=ServerFactory.forProtocol(lambda: Server(999999)),
         clock=clock,
     )
-    # maybe I just want to use connectedServerAndClient directly if I'm customizing all this stuff
     client, server, pump = connectedServerAndClient(
         lambda: serverF.buildProtocol(None),
         lambda: clientF.buildProtocol(None),

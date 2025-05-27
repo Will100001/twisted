@@ -1032,6 +1032,9 @@ class ClientTLSOptions:
     @ivar _hostnameIsDnsName: Whether or not the C{_hostname} is a DNSName.
         Will be L{False} if C{_hostname} is an IP address or L{True} if
         C{_hostname} is a DNSName
+
+    @ivar _sendServerName: Whether the hostname will be sent via the TLS
+        ServerName Indicatino extension.
     """
 
     _ctx: Optional[SSL.Context]
@@ -1039,6 +1042,7 @@ class ClientTLSOptions:
     _hostnameASCII: str
     _hostnameIsDnsName: bool
     _hostnameBytes: bytes
+    _sendServerName: bool
 
     def __init__(
         self,
@@ -1047,6 +1051,7 @@ class ClientTLSOptions:
         createContext: Callable[[], SSL.Context],
         configureContext: Callable[[SSL.Context], None],
         configureConnection: Callable[[SSL.Connection], None],
+        sendServerName: bool | None = None,
     ) -> None:
         """
         Initialize L{ClientTLSOptions}.
@@ -1055,6 +1060,11 @@ class ClientTLSOptions:
         @type hostname: L{unicode}
 
         @param createContext: A function that will create an SSL context.
+
+        @param sendServerName: Should the server name be sent to the peer?
+            C{None} means "follow the specification", which will send it if
+            it's a valid DNS name and refrain from sending it if it's an IP
+            address; C{True} means always send, and C{False} means never send.
         """
         self._createContext = createContext
         self._hostname = hostname
@@ -1071,6 +1081,9 @@ class ClientTLSOptions:
         self._createContext = createContext
         self._configureContext = configureContext
         self._configureConnection = configureConnection
+        if sendServerName is None:
+            sendServerName = self._hostnameIsDnsName
+        self._sendServerName = sendServerName
 
     def createClientCreator(
         self,
@@ -1078,7 +1091,14 @@ class ClientTLSOptions:
         contextSetupHook: Callable[[SSL.Context], None],
     ) -> IOpenSSLClientConnectionCreator:
         """
-        Create a client creator.
+        Clone this L{ClientTLSOptions} to create a new
+        L{IOpenSSLClientConnectionCreator} with the specified parameters.
+
+        @see: L{IOpenSSLClientConnectionCreatorFactory}
+
+        @return: A clone of this L{ClientTLSOptions} with
+            C{connectionSetupHook} and C{contextSetupHook} modified with the
+            given ones.
         """
         return ClientTLSOptions(
             self._hostname,
@@ -1086,6 +1106,7 @@ class ClientTLSOptions:
             self._createContext,
             contextSetupHook,
             connectionSetupHook,
+            self._sendServerName,
         )
 
     def clientConnectionForTLS(self, tlsProtocol: TLSMemoryBIOProtocol) -> Connection:
@@ -1093,10 +1114,8 @@ class ClientTLSOptions:
         Create a TLS connection for a client.
 
         @param tlsProtocol: the TLS protocol initiating the connection.
-        @type tlsProtocol: L{twisted.protocols.tls.TLSMemoryBIOProtocol}
 
         @return: the configured client connection.
-        @rtype: L{OpenSSL.SSL.Connection}
         """
         if self._ctx is None:
             self._ctx = self._createContext()
@@ -1105,7 +1124,7 @@ class ClientTLSOptions:
         connection = SSL.Connection(context, None)
         # Literal IPv4 and IPv6 addresses are not permitted
         # as host names according to the RFCs
-        if self._hostnameIsDnsName:
+        if self._sendServerName:
             connection.set_tlsext_host_name(self._hostnameBytes)
         callback = _verifyCB(tlsProtocol, self._hostnameIsDnsName, self._hostnameASCII)
         connection.set_verify(VERIFY_PEER | VERIFY_FAIL_IF_NO_PEER_CERT, callback)
@@ -1156,6 +1175,7 @@ def optionsForClientTLS(
     acceptableProtocols: Optional[List[bytes]] = None,
     *,
     extraCertificateOptions: Optional[dict[str, Any]] = None,
+    sendServerName: bool | None = None,
 ) -> ClientTLSOptions:
     """
     Create a L{client connection creator <IOpenSSLClientConnectionCreator>} for
@@ -1172,7 +1192,6 @@ def optionsForClientTLS(
         The second purpose is to use the U{Server Name Indication extension
         <https://en.wikipedia.org/wiki/Server_Name_Indication>} to indicate to
         the server which certificate should be used.
-    @type hostname: L{unicode}
 
     @param trustRoot: Specification of trust requirements of peers.  This may
         be a L{Certificate} or the result of L{platformTrust}.  By default it
@@ -1180,12 +1199,10 @@ def optionsForClientTLS(
         really know what you're doing.  Be aware that clients using this
         interface I{must} verify the server; you cannot explicitly pass L{None}
         since that just means to use L{platformTrust}.
-    @type trustRoot: L{IOpenSSLTrustRoot}
 
     @param clientCertificate: The certificate and private key that the client
         will use to authenticate to the server.  If unspecified, the client
         will not authenticate.
-    @type clientCertificate: L{PrivateCertificate}
 
     @param acceptableProtocols: The protocols this peer is willing to speak
         after the TLS negotiation has completed, advertised over ALPN.  If this
@@ -1194,13 +1211,16 @@ def optionsForClientTLS(
         not offer ALPN, the connection will be established, but no protocol wil
         be negotiated.  Protocols earlier in the list are preferred over those
         later in the list.
-    @type acceptableProtocols: L{list} of L{bytes}
 
     @param extraCertificateOptions: A dictionary of additional keyword
         arguments to be presented to L{CertificateOptions}.  Please avoid using
         this unless you absolutely need to; any time you need to pass an option
         here that is a bug in this interface.
-    @type extraCertificateOptions: L{dict}
+
+    @param sendServerName: Should the server name be sent to the peer?  C{None}
+        means "follow the specification", which will send it if it's a valid
+        DNS name and refrain from sending it if it's an IP address; C{True}
+        means always send, and C{False} means never send.
 
     @return: A client connection creator.
     @rtype: L{IOpenSSLClientConnectionCreator}
@@ -1230,6 +1250,7 @@ def optionsForClientTLS(
         certificateOptions.getContext,
         lambda _: None,
         lambda _: None,
+        sendServerName,
     )
 
 
