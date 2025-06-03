@@ -58,10 +58,15 @@ def _autoJobs() -> int:
     @returns: A strictly positive integer.
     """
     number: Optional[int]
-    if getattr(os, "process_cpu_count", None) is not None:
-        number = os.process_cpu_count()  # type: ignore[attr-defined]
-    elif getattr(os, "sched_getaffinity", None) is not None:
-        number = len(os.sched_getaffinity(0))
+
+    # These functions have platform-dependent availability in mypy, so we
+    # sidestep the type checker here for consistency, to avoid a hard platform
+    # dependency for type checking. It's unfortunate that they are Any here,
+    # but better than not being able to get accurate type information locally.
+    if (process_cpu_count := getattr(os, "process_cpu_count", None)) is not None:
+        number = process_cpu_count()
+    elif (sched_getaffinity := getattr(os, "sched_getaffinity", None)) is not None:
+        number = len(sched_getaffinity(0))
     else:
         number = os.cpu_count()
     if number is None or number < 1:
