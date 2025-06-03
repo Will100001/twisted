@@ -194,7 +194,7 @@ def autoReloadingDirectoryOfPEMs(
         if not shouldReload:
             return None
         msg = "could not find domain {name}, re-loading {path}"
-        log.error(msg, name=name, path=path)
+        log.warn(msg, name=name, path=path)
         doReload()
         return lookup(name, False)
 
@@ -208,8 +208,8 @@ class PEMObjects:
     A collection of objects loaded from a PEM encoded file.
     """
 
-    certificates: List[Certificate]
-    keyPairs: List[KeyPair]
+    certificates: List[tuple[FilePath[str], Certificate]]
+    keyPairs: List[tuple[FilePath[str], KeyPair]]
 
     @classmethod
     def fromDirectory(cls, directory: FilePath[str]) -> PEMObjects:
@@ -220,13 +220,13 @@ class PEMObjects:
         for fp in directory.walk():
             if fp.basename().endswith(".pem") and fp.isfile():
                 with fp.open() as f:
-                    subself = cls.fromLines(f)
+                    subself = cls.fromLines(fp, f)
                     self.certificates.extend(subself.certificates)
                     self.keyPairs.extend(subself.keyPairs)
         return self
 
     @classmethod
-    def fromLines(cls, pemlines: Iterable[bytes]) -> PEMObjects:
+    def fromLines(cls, fp: FilePath[str], pemlines: Iterable[bytes]) -> PEMObjects:
         """
         Load some objects from the lines of a PEM binary file.
         """
@@ -239,8 +239,12 @@ class PEMObjects:
                 blobs.append(b"")
             blobs[-1] += line
         return cls(
-            keyPairs=[KeyPair.load(keyBlob, FILETYPE_PEM) for keyBlob in keyBlobs],
-            certificates=[Certificate.loadPEM(certBlob) for certBlob in certBlobs],
+            keyPairs=[
+                (fp, KeyPair.load(keyBlob, FILETYPE_PEM)) for keyBlob in keyBlobs
+            ],
+            certificates=[
+                (fp, Certificate.loadPEM(certBlob)) for certBlob in certBlobs
+            ],
         )
 
     def inferDomainMapping(self) -> Dict[str, CertificateOptions]:
@@ -253,14 +257,20 @@ class PEMObjects:
         certificatesByFingerprint = dict(
             [
                 (certificate.getPublicKey().keyHash(), certificate)
-                for certificate in self.certificates
+                for (_, certificate) in self.certificates
             ]
         )
 
-        for keyPair in self.keyPairs:
-            matchingCertificate = certificatesByFingerprint.pop(keyPair.keyHash(), None)
+        for pairPath, keyPair in self.keyPairs:
+            keyHash = keyPair.keyHash()
+            matchingCertificate = certificatesByFingerprint.pop(keyHash, None)
             if matchingCertificate is None:
                 # log something?
+                log.warn(
+                    "unused private key at {path} with hash {hash}",
+                    path=pairPath.path,
+                    hash=keyHash,
+                )
                 continue
             privateCerts.append(
                 (

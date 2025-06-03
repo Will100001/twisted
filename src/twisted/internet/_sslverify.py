@@ -692,7 +692,7 @@ class PublicKey:
 
 class KeyPair(PublicKey):
     @classmethod
-    def load(Class, data, format=crypto.FILETYPE_ASN1):
+    def load(Class, data: bytes, format: int = crypto.FILETYPE_ASN1) -> KeyPair:
         return Class(crypto.load_privatekey(format, data))
 
     def dump(self, format=crypto.FILETYPE_ASN1):

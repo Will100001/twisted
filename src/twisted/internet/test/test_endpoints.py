@@ -110,6 +110,7 @@ escapedChainPathName = endpoints.quoteStringArgument(chainPath.path)
 
 
 try:
+    from OpenSSL.crypto import FILETYPE_PEM
     from OpenSSL.SSL import (
         TLS_METHOD,
         Connection,
@@ -3104,7 +3105,10 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
         Set up client and server SSL contexts for use later.
         """
         testMethod = getattr(self, self.id().split(".")[-1])
-        serverServiceIdentity = getattr(
+        self.certificatesDirectory = FilePath(self.mktemp())
+        self.certificatesDirectory.createDirectory()
+
+        self.serverServiceIdentity = getattr(
             testMethod,
             "serverServiceIdentity",
             "endpoint-test.example.com",
@@ -3112,13 +3116,9 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
         clientServiceIdentity = getattr(
             testMethod,
             "clientServiceIdentity",
-            serverServiceIdentity,
+            self.serverServiceIdentity,
         )
-        ca, server = certificatesForAuthorityAndServer(serverServiceIdentity)
-        untrustedCA, unusedCert = certificatesForAuthorityAndServer(
-            serverServiceIdentity
-        )
-        self.unusedCert = unusedCert
+        ca, server = certificatesForAuthorityAndServer(self.serverServiceIdentity)
 
         self.serverCert = server
         shouldSendServerName = getattr(
@@ -3153,7 +3153,6 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
         """
         address = IPv6Address("TCP", "::", 0)
 
-        fp = FilePath(self.mktemp())
         testMethod = getattr(self, self.id().split(".")[-1])
 
         def oopsie(name: bytes | None) -> Context:
@@ -3162,17 +3161,15 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
             raise Oops()
 
         lookupper = (
-            endpoints.autoReloadingDirectoryOfPEMs(fp)
+            endpoints.autoReloadingDirectoryOfPEMs(self.certificatesDirectory)
             if not getattr(testMethod, "brokenSNILookup", False)
             else oopsie
         )
         snic = ServerNameIndicationConfiguration(lookupper)
-        fp.createDirectory()
         if not getattr(testMethod, "noCertsAtAll", False):
-            fp.child("stuff.pem").setContent(self.serverCert.dumpPEM())
-            # superclass (Certificate.dumpPEM) does not include private key in
-            # its output, just the certificate
-            fp.child("ignored.pem").setContent(Certificate.dumpPEM(self.unusedCert))
+            self.certificatesDirectory.child("stuff.pem").setContent(
+                self.serverCert.dumpPEM()
+            )
         return (
             endpoints.TLSServerEndpoint(
                 TCP6ServerEndpoint(reactor, address.port, **listenArgs),
@@ -3340,6 +3337,32 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
         )
 
     setattr(test_noCertsAtAll, "noCertsAtAll", True)
+
+    def test_mismatchedKeys(self) -> None:
+        """
+        If dangling certificates are found they are ignored, if dangling
+        private keys are found a warning is logged.
+        """
+        logObserver = EventLoggingObserver.createWithCleanup(self, globalLogPublisher)
+        untrustedCA, unusedCert = certificatesForAuthorityAndServer(
+            self.serverServiceIdentity
+        )
+        # superclass (Certificate.dumpPEM) does not include private key in
+        # its output, just the certificate
+        self.certificatesDirectory.child("ignored-cert.pem").setContent(
+            Certificate.dumpPEM(unusedCert)
+        )
+        danglingKey = self.certificatesDirectory.child("ignored-key.pem")
+        danglingKey.setContent(KeyPair.generate().dump(FILETYPE_PEM))
+        self.unusedCert = unusedCert
+        self.connectionTest()
+        relevant = [
+            each
+            for each in logObserver
+            if each["log_format"] == "unused private key at {path} with hash {hash}"
+        ]
+        self.assertGreaterEqual(len(relevant), 1)
+        self.assertEqual(relevant[0]["path"], danglingKey.path)
 
 
 class UNIXEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
