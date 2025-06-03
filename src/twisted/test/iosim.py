@@ -10,7 +10,7 @@ from __future__ import annotations
 import itertools
 from typing import Callable, TypeVar
 
-from twisted.internet.interfaces import ITransport
+from twisted.internet.interfaces import IReactorTime, ITransport
 from twisted.internet.task import Clock
 
 try:
@@ -550,6 +550,7 @@ class ConnectionCompleter:
                         clientTransport,
                         debug,
                         greet=greet,
+                        clock=IReactorTime(self._reactor, None),
                     )
                     return result
         return None

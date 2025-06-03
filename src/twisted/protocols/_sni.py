@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Tuple
 
 from zope.interface import implementer
 
 from OpenSSL.crypto import FILETYPE_PEM
 from OpenSSL.SSL import TLS_METHOD, Connection, Context
 
-import attr
 from cryptography.x509 import DNSName, ExtensionOID, load_pem_x509_certificate
 
 from twisted.internet.defer import Deferred
@@ -18,6 +17,7 @@ from twisted.internet.interfaces import (
     IOpenSSLServerConnectionCreator,
     IOpenSSLServerConnectionCreatorFactory,
     IProtocolFactory,
+    IReactorTime,
     IStreamServerEndpoint,
 )
 from twisted.internet.ssl import (
@@ -42,7 +42,7 @@ class SNIConnectionCreator(object):
     _connectionSetupHook: Callable[[Connection], None]
     _contextSetupHook: Callable[[Context], None]
 
-    def _lookupContext(self, name: Optional[bytes]) -> Context:
+    def _lookupContext(self, name: bytes | None) -> Context:
         ctxLookup = self._configForSNI._contextLookup
         candidate = ctxLookup(name)
         if candidate is None:
@@ -55,10 +55,8 @@ class SNIConnectionCreator(object):
                 # coverage ^
 
         if candidate is None:
-            # coverage v
-            raise KeyError(f"no certificate for domain {name!r}")
-            # coverage ^
-
+            log.warn("no server certificate for name {name!r}", name=name)
+            return Context(TLS_METHOD)
         self._contextSetupHook(candidate)
         return candidate
 
@@ -67,7 +65,15 @@ class SNIConnectionCreator(object):
         defaultContext = self._lookupContext(None)
 
         def selectContext(connection: Connection) -> None:
-            connection.set_context(self._lookupContext(connection.get_servername()))
+            servername: bytes | None = b"(exception while getting servername)"
+            try:
+                servername = connection.get_servername()
+                connection.set_context(self._lookupContext(servername))
+            except BaseException:
+                log.failure(
+                    "exception during context lookup for {servername}",
+                    servername=servername,
+                )
 
         defaultContext.set_tlsext_servername_callback(selectContext)
         return defaultContext
@@ -88,7 +94,7 @@ class SNIConnectionCreator(object):
         return newConnection
 
 
-LookerUpper = Callable[[Optional[bytes]], Optional[Context]]
+LookerUpper = Callable[[bytes | None], Context | None]
 
 
 @implementer(IOpenSSLServerConnectionCreatorFactory)
@@ -119,14 +125,18 @@ class ServerNameIndicationConfiguration:
 @implementer(IStreamServerEndpoint)
 class TLSServerEndpoint(object):
     def __init__(
-        self, endpoint: IStreamServerEndpoint, contextFactory: SomeConnectionCreator
+        self,
+        endpoint: IStreamServerEndpoint,
+        contextFactory: SomeConnectionCreator,
+        clock: IReactorTime | None = None,
     ) -> None:
         self.endpoint = endpoint
         self.contextFactory = contextFactory
+        self.clock = clock
 
     def listen(self, factory: IProtocolFactory) -> Deferred[IListeningPort]:
         return self.endpoint.listen(
-            TLSMemoryBIOFactory(self.contextFactory, False, factory)
+            TLSMemoryBIOFactory(self.contextFactory, False, factory, clock=self.clock)
         )
 
 
@@ -174,12 +184,13 @@ def autoReloadingDirectoryOfPEMs(path: FilePath[str]) -> LookerUpper:
         nonlocal certMap
         certMap = PEMObjects.fromDirectory(path).inferDomainMapping()
 
-    def lookup(name: Optional[bytes], shouldReload: bool = True) -> Context:
-        name = next(iter(certMap.keys()), "").encode() if name is None else name
+    def lookup(name: bytes | None, shouldReload: bool = True) -> Context | None:
+        name = next(iter(certMap.keys()), "").encode() if name in (None, b"") else name
+        assert name is not None
         if (options := certMap.get(name.decode())) is not None:
             return options.getContext()
         if not shouldReload:
-            return Context(TLS_METHOD)
+            return None
         msg = "could not find domain {name}, re-loading {path}"
         log.error(msg, name=name, path=path)
         doReload()
@@ -189,7 +200,7 @@ def autoReloadingDirectoryOfPEMs(path: FilePath[str]) -> LookerUpper:
     return lookup
 
 
-@attr.s(auto_attribs=True)
+@dataclass
 class PEMObjects:
     """
     A collection of objects loaded from a PEM encoded file.

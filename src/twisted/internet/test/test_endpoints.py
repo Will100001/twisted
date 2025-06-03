@@ -41,31 +41,38 @@ from twisted.internet.address import (
 )
 from twisted.internet.endpoints import (
     StandardErrorBehavior,
+    TCP4ClientEndpoint,
     TCP6ServerEndpoint,
     _WrapperEndpoint,
+    wrapClientTLS,
 )
-from twisted.internet.error import ConnectingCancelledError
+from twisted.internet.error import ConnectingCancelledError, ConnectionLost
 from twisted.internet.interfaces import (
     IAddress,
     IConsumer,
+    IHandshakeListener,
     IHostnameResolver,
     IProtocolFactory,
     IPushProducer,
     IReactorPluggableNameResolver,
     IReactorTCP,
+    IReactorTime,
     IStreamClientEndpoint,
+    IStreamServerEndpoint,
     ITransport,
 )
 from twisted.internet.protocol import ClientFactory, Factory, Protocol
 from twisted.internet.stdio import PipeAddress
 from twisted.internet.task import Clock
 from twisted.internet.testing import (
+    EventLoggingObserver,
+    MemoryReactorClock,
     MemoryReactorClock as MemoryReactor,
     RaisingMemoryReactor,
     StringTransport,
     StringTransportWithDisconnection,
 )
-from twisted.logger import ILogObserver, globalLogPublisher
+from twisted.logger import ILogObserver, formatEvent, globalLogPublisher
 from twisted.plugin import getPlugins
 from twisted.protocols import basic, policies
 from twisted.python import log
@@ -74,7 +81,11 @@ from twisted.python.failure import Failure
 from twisted.python.filepath import FilePath
 from twisted.python.modules import getModule
 from twisted.python.systemd import ListenFDs
-from twisted.test.iosim import connectableEndpoint, connectedServerAndClient
+from twisted.test.iosim import (
+    ConnectionCompleter,
+    connectableEndpoint,
+    connectedServerAndClient,
+)
 from twisted.trial import unittest
 
 pemPath = getModule("twisted.test").filePath.sibling("server.pem")
@@ -100,6 +111,8 @@ escapedChainPathName = endpoints.quoteStringArgument(chainPath.path)
 try:
     from OpenSSL.SSL import (
         TLS_METHOD,
+        Connection,
+        Context,
         Context as ContextType,
         OP_NO_SSLv3,
         TLSv1_2_METHOD,
@@ -678,10 +691,16 @@ class ClientEndpointTestCaseMixin(FakeTestBase):
         self.assertConnectArgs(expectedClients[0], expectedArgs)
 
 
-class ServerEndpointTestCaseMixin:
+class ServerEndpointTestCaseMixin(FakeTestBase):
     """
     Generic test methods to be mixed into all client endpoint test classes.
     """
+
+    @abstractmethod
+    def createServerEndpoint(
+        self, reactor: IReactorTCP, serverFactory: IProtocolFactory, **connectArgs: Any
+    ) -> tuple[IStreamServerEndpoint, tuple[object, ...], IAddress]:
+        ...
 
     def test_interface(self):
         """
@@ -716,18 +735,18 @@ class ServerEndpointTestCaseMixin:
         self.assertEqual(receivedHosts, [expectedHost])
         self.assertEqual(self.expectedServers(mreactor), [expectedArgs])
 
-    def test_endpointListenFailure(self):
+    def test_endpointListenFailure(self) -> None:
         """
         When an endpoint tries to listen on an already listening port, a
         C{CannotListenError} failure is errbacked.
         """
-        factory = object()
+        factory = Factory.forProtocol(Protocol)
         exception = error.CannotListenError("", 80, factory)
-        mreactor = RaisingMemoryReactor(listenException=exception)
+        mreactor = RaisingMemoryReactorWithClock(listenException=exception)
 
         ep, ignoredArgs, ignoredDest = self.createServerEndpoint(mreactor, factory)
 
-        d = ep.listen(object())
+        d = ep.listen(factory)
 
         receivedExceptions = []
 
@@ -2964,6 +2983,12 @@ class SSL4EndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
         )
 
 
+class Oops(Exception):
+    """
+    A sample custom exception.
+    """
+
+
 @skipIf(skipSSL, skipSSLReason)
 class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
     """
@@ -3036,12 +3061,35 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
         """
         Set up client and server SSL contexts for use later.
         """
-        serviceIdentity = "endpoint-test.example.com"
-        ca, server = certificatesForAuthorityAndServer(serviceIdentity)
-        self.clientSSLContext = optionsForClientTLS(serviceIdentity, trustRoot=ca)
+        testMethod = getattr(self, self.id().split(".")[-1])
+        serverServiceIdentity = getattr(
+            testMethod,
+            "serverServiceIdentity",
+            "endpoint-test.example.com",
+        )
+        clientServiceIdentity = getattr(
+            testMethod,
+            "clientServiceIdentity",
+            serverServiceIdentity,
+        )
+        ca, server = certificatesForAuthorityAndServer(serverServiceIdentity)
+        self.serverCert = server
+        shouldSendServerName = getattr(
+            testMethod,
+            "sendServerName",
+            True,
+        )
+        self.clientSSLContext = optionsForClientTLS(
+            clientServiceIdentity,
+            trustRoot=ca,
+            sendServerName=shouldSendServerName,
+        )
 
     def createServerEndpoint(
-        self, reactor: object, factory: Factory, **listenArgs: object
+        self,
+        reactor: IReactorTCP,
+        serverFactory: IProtocolFactory,
+        **listenArgs: object,
     ) -> tuple[endpoints.TLSServerEndpoint, tuple[object, ...], IPv6Address]:
         """
         Create an L{TLSServerEndpoint} and return the tools to verify its
@@ -3049,22 +3097,37 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
 
         @param factory: The thing that we expect to be passed to our
             L{IStreamServerEndpoint.listen} implementation.
-        @param reactor: A fake L{IReactorSSL} that L{TLSServerEndpoint} can
-            call L{IReactorSSL.listenSSL} on.
+
+        @param reactor: A fake L{IReactorTCP} that L{TLSServerEndpoint} can
+            call L{IReactorSSL.listenTCP} on.
+
         @param listenArgs: Optional dictionary of arguments to
-            L{IReactorSSL.listenSSL}.
+            L{IReactorSSL.listenTCP}.
         """
         address = IPv6Address("TCP", "::", 0)
 
-        from twisted.internet.endpoints import autoReloadingDirectoryOfPEMs
-
         fp = FilePath(self.mktemp())
-        snic = ServerNameIndicationConfiguration(autoReloadingDirectoryOfPEMs(fp))
+        testMethod = getattr(self, self.id().split(".")[-1])
+
+        def oopsie(name: bytes | None) -> Context:
+            if name is None:
+                return Context(TLS_METHOD)
+            raise Oops()
+
+        lookupper = (
+            endpoints.autoReloadingDirectoryOfPEMs(fp)
+            if not getattr(testMethod, "brokenSNILookup", False)
+            else oopsie
+        )
+        snic = ServerNameIndicationConfiguration(lookupper)
+        fp.createDirectory()
+        if not getattr(testMethod, "noCertsAtAll", False):
+            fp.child("stuff.pem").setContent(self.serverCert.dumpPEM())
 
         class FactoryChecker:
             def __eq__(iself, other: object) -> bool:
                 assert isinstance(other, TLSMemoryBIOFactory)
-                self.assertIs(other.wrappedFactory, factory)
+                self.assertIs(other.wrappedFactory, serverFactory)
 
                 # This is a very unfortunate white-box test, but I just want to
                 # look at the *value* of the SNI configuration; given that
@@ -3081,6 +3144,7 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
             endpoints.TLSServerEndpoint(
                 TCP6ServerEndpoint(reactor, address.port, **listenArgs),
                 snic,
+                clock=IReactorTime(reactor),
             ),
             (
                 address.port,
@@ -3124,6 +3188,119 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
             ),
             address,
         )
+
+    def connectionTest(self, error: type[Exception] | None = None) -> None:
+        """
+        Test that a client fully connects and verifies the certificate without
+        disconnecting.
+        """
+        memr = MemoryReactorClock()
+        mades = []
+        recvs = []
+        reasons = []
+
+        @implementer(IHandshakeListener)
+        class DataCatcher(Protocol):
+            def handshakeCompleted(self) -> None:
+                assert self.transport is not None
+                self.transport.write(b"hello")
+
+            def connectionMade(self) -> None:
+                mades.append(self)
+
+            def dataReceived(self, data: bytes) -> None:
+                recvs.append(data)
+
+            def connectionLost(self, reason: Failure | None = None) -> None:
+                assert reason is not None
+                reasons.append(reason)
+
+        fact = Factory.forProtocol(DataCatcher)
+        ep, args, host = self.createServerEndpoint(memr, fact)
+        self.successResultOf(ep.listen(fact))
+
+        clientf = Factory.forProtocol(Protocol)
+        cep = wrapClientTLS(
+            self.clientSSLContext,
+            TCP4ClientEndpoint(memr, host.host, host.port),
+            clock=memr,
+        )
+        compl = ConnectionCompleter(memr)
+        d = cep.connect(clientf)
+        pump = compl.succeedOnce()
+        assert pump is not None
+        pump.flush()
+        cconn = self.successResultOf(d)
+        pump.flush()
+        cconn.transport.write(b"some bytes")
+        pump.flush()
+        if error is None:
+            self.assertEqual(recvs, [b"some bytes"])
+            self.assertEqual(reasons, [])
+        else:
+            [reason] = reasons
+            reason.check(error)
+
+    def test_connectDefaultCert(self) -> None:
+        """
+        Connect with no SNI to get the default certificate, which should still verify.
+        """
+        self.connectionTest()
+
+    setattr(test_connectDefaultCert, "sendServerName", False)
+
+    def test_connectWildcard(self) -> None:
+        """
+        Connect with SNI that identifies a specific host, respond with a wildcard.
+        """
+        self.connectionTest()
+
+    setattr(
+        test_connectWildcard,
+        "serverServiceIdentity",
+        "*.service.example.net",
+    )
+    setattr(
+        test_connectWildcard,
+        "clientServiceIdentity",
+        "arbitrary.service.example.net",
+    )
+
+    def test_lookupException(self) -> None:
+        """
+        Exceptions when looking up a certificate are logged.
+        """
+        self.connectionTest(ConnectionLost)
+        self.assertEqual(len(self.flushLoggedErrors(Oops)), 1)
+
+    setattr(test_lookupException, "brokenSNILookup", True)
+
+    def test_lookupFailure(self) -> None:
+        """
+        Connect with SNI that identifies a specific host that we have no
+        certificate for.
+        """
+        self.connectionTest(ConnectionLost)
+
+    setattr(
+        test_lookupFailure,
+        "clientServiceIdentity",
+        "incorrect.example.org",
+    )
+
+    def test_noCertsAtAll(self) -> None:
+        """
+        If the certificate lookup function cannot find any certificates at all,
+        we will see a legible logged error.
+        """
+        logObserver = EventLoggingObserver.createWithCleanup(self, globalLogPublisher)
+        self.connectionTest(ConnectionLost)
+        self.assertEqual(
+            formatEvent(logObserver[-1]),
+            "no server certificate for name b'endpoint-test.example.com'",
+        )
+
+    setattr(test_noCertsAtAll, "noCertsAtAll", True)
 
 
 class UNIXEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
@@ -3413,14 +3590,19 @@ class ServerStringTests(unittest.TestCase):
 
     @skipIf(skipSSL, skipSSLReason)
     def test_tls(self) -> None:
-        from OpenSSL.SSL import Context
-
-        from twisted.protocols._sni import SNIConnectionCreator
-
-        reactor = object()
+        """
+        The TLS endpoint
+        """
+        reactor = MemoryReactorClock()
+        tmp = self.mktemp()
+        p = FilePath(tmp)
+        p.createDirectory()
+        # create a temporary directory with a certificate in it, so we have a default certificate
+        authCert, serverCert = certificatesForAuthorityAndServer()
+        p.child("some.pem").setContent(serverCert.dumpPEM())
         server = endpoints.serverFromString(
             reactor,
-            "tls:./cert-path:1234:backlog=12:interface=10.0.0.1",
+            f"tls:{tmp}:1234:backlog=12:interface=10.0.0.1",
         )
         self.assertIsInstance(server, endpoints.TLSServerEndpoint)
         subendpoint = server.endpoint
@@ -3430,10 +3612,14 @@ class ServerStringTests(unittest.TestCase):
         self.assertEqual(subendpoint._interface, "10.0.0.1")
         ctx = server.contextFactory
         self.assertIsInstance(ctx, endpoints.ServerNameIndicationConfiguration)
-        sc: SNIConnectionCreator = ctx.createServerCreator(
-            lambda con: None,
-            lambda ctx: None,
-        )
+
+        def cxnSetup(cxn: Connection) -> None:
+            ...
+
+        def ctxSetup(ctx: Context) -> None:
+            ...
+
+        sc: SNIConnectionCreator = ctx.createServerCreator(cxnSetup, ctxSetup)
         self.assertIsInstance(sc, SNIConnectionCreator)
         factory = TLSMemoryBIOFactory(ctx, False, Factory.forProtocol(Protocol))
         proto = factory.buildProtocol(IPv4Address("TCP", "127.0.0.1", 1234))
@@ -4666,7 +4852,7 @@ def replacingGlobals(function, **newGlobals):
     mergedGlobals = {}
     mergedGlobals.update(funcGlobals)
     mergedGlobals.update(newGlobals)
-    newFunction = FunctionType(codeObject, mergedGlobals)
+    newFunction = FunctionType(codeObject, mergedGlobals, argdefs=function.__defaults__)
     mergedGlobals[function.__name__] = newFunction
     return newFunction
 

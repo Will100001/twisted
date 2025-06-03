@@ -1,4 +1,4 @@
-# -*- test-case-name: twisted.internet.test.test_endpoints.HostnameEndpointMemoryIPv4ReactorTests.test_errorsLogged -*-
+# -*- test-case-name: twisted.internet.test.test_endpoints -*-
 # Copyright (c) Twisted Matrix Laboratories.
 # See LICENSE for details.
 
@@ -44,6 +44,7 @@ from twisted.internet.interfaces import (
     IReactorCore,
     IReactorPluggableNameResolver,
     IReactorSocket,
+    IReactorTime,
     IResolutionReceiver,
     IStreamClientEndpoint,
     IStreamClientEndpointStringParserWithReactor,
@@ -2286,6 +2287,7 @@ class _WrapperServerEndpoint:
 def wrapClientTLS(
     connectionCreator: IOpenSSLClientConnectionCreator,
     wrappedEndpoint: IStreamClientEndpoint,
+    clock: IReactorTime | None = None,
 ) -> _WrapperEndpoint:
     """
     Wrap an endpoint which upgrades to TLS as soon as the connection is
@@ -2312,7 +2314,10 @@ def wrapClientTLS(
     return _WrapperEndpoint(
         wrappedEndpoint,
         lambda protocolFactory: TLSMemoryBIOFactory(
-            connectionCreator, True, protocolFactory
+            connectionCreator,
+            True,
+            protocolFactory,
+            clock=clock,
         ),
     )
 
