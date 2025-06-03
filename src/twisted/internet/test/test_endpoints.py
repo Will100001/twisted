@@ -3009,8 +3009,7 @@ class TLSWrapperFactoryChecker:
     protocolFactory: IProtocolFactory
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, TLSMemoryBIOFactory):
-            return False
+        assert isinstance(other, TLSMemoryBIOFactory), "must be a TLS factory"
         self.testCase.assertIs(other.wrappedFactory, self.protocolFactory)
         return True
 
