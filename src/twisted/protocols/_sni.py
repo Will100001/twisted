@@ -1,3 +1,5 @@
+# -*- test-case-name: twisted.internet.test.test_endpoints -*-
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -56,7 +58,8 @@ class SNIConnectionCreator(object):
 
         if candidate is None:
             log.warn("no server certificate for name {name!r}", name=name)
-            return Context(TLS_METHOD)
+            self._contextSetupHook(fallbackCtx := Context(TLS_METHOD))
+            return fallbackCtx
         self._contextSetupHook(candidate)
         return candidate
 
