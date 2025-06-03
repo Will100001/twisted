@@ -2288,7 +2288,7 @@ def wrapClientTLS(
     connectionCreator: IOpenSSLClientConnectionCreator,
     wrappedEndpoint: IStreamClientEndpoint,
     clock: IReactorTime | None = None,
-) -> _WrapperEndpoint:
+) -> IStreamClientEndpoint:
     """
     Wrap an endpoint which upgrades to TLS as soon as the connection is
     established.
