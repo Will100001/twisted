@@ -3263,7 +3263,8 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
         pump.flush()
         cconn = self.successResultOf(d)
         pump.flush()
-        cconn.transport.write(b"some bytes")
+        transport: ITransport = cconn.transport  # type:ignore[attr-defined]
+        transport.write(b"some bytes")
         pump.flush()
         if error is None:
             self.assertEqual(recvs, [b"some bytes"])
