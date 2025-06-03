@@ -9,10 +9,11 @@ L{twisted.internet.endpoints}.
 from __future__ import annotations
 
 from abc import abstractmethod
+from dataclasses import dataclass
 from errno import EPERM
 from socket import AF_INET, AF_INET6, IPPROTO_TCP, SOCK_STREAM, AddressFamily, gaierror
 from types import FunctionType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Sequence
 from unicodedata import normalize
 from unittest import skipIf
 
@@ -130,7 +131,7 @@ try:
         ServerNameIndicationConfiguration,
         SNIConnectionCreator,
     )
-    from twisted.protocols.tls import TLSMemoryBIOFactory
+    from twisted.protocols.tls import TLSMemoryBIOFactory, TLSMemoryBIOProtocol
     from twisted.test.test_sslverify import (
         certificatesForAuthorityAndServer,
         makeCertificate,
@@ -536,7 +537,7 @@ class ClientEndpointTestCaseMixin(FakeTestBase):
         ...
 
     @abstractmethod
-    def expectedClients(self, reactor: IReactorTCP) -> list[tuple[object, ...]]:
+    def expectedClients(self, reactor: MemoryReactor) -> Sequence[tuple[object, ...]]:
         ...
 
     @abstractmethod
@@ -575,36 +576,40 @@ class ClientEndpointTestCaseMixin(FakeTestBase):
         A client endpoint can connect and returns a deferred who gets called
         back with a protocol instance.
         """
-        proto = object()
+        expectedProto = object()
         mreactor = MemoryReactor()
         clientFactory: Any = object()
         ep, expectedArgs, ignoredDest = self.createClientEndpoint(
             mreactor, clientFactory
         )
         d = ep.connect(clientFactory)
-        receivedProtos = []
-
-        def checkProto(p):
-            receivedProtos.append(p)
-
-        d.addCallback(checkProto)
         factory = self.retrieveConnectedFactory(mreactor)
-        factory._onConnection.callback(proto)
-        self.assertEqual(receivedProtos, [proto])
+        self.satisfyPendingConnect(factory, expectedProto)
+        receivedProto = self.successResultOf(d)
+        self.assertEqual(receivedProto, expectedProto)
         expectedClients = self.expectedClients(mreactor)
         self.assertEqual(len(expectedClients), 1)
         self.assertConnectArgs(expectedClients[0], expectedArgs)
 
-    def test_endpointConnectFailure(self):
+    def satisfyPendingConnect(
+        self, connectingFactory: Any, expectedProto: object
+    ) -> None:
+        """
+        Satisfy the L{Deferred} returned from the endpoint under test's
+        C{connect}.
+        """
+        connectingFactory._onConnection.callback(expectedProto)
+
+    def test_endpointConnectFailure(self) -> None:
         """
         If an endpoint tries to connect to a non-listening port it gets
         a C{ConnectError} failure.
         """
         expectedError = error.ConnectError(string="Connection Failed")
 
-        mreactor = RaisingMemoryReactor(connectException=expectedError)
+        mreactor = RaisingMemoryReactorWithClock(connectException=expectedError)
 
-        clientFactory = object()
+        clientFactory = Factory.forProtocol(Protocol)
 
         ep, ignoredArgs, ignoredDest = self.createClientEndpoint(
             mreactor, clientFactory
@@ -1432,7 +1437,9 @@ class TCP4EndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
             address,
         )
 
-    def createClientEndpoint(self, reactor, clientFactory, **connectArgs):
+    def createClientEndpoint(
+        self, reactor: IReactorTCP, clientFactory: IProtocolFactory, **connectArgs: Any
+    ) -> tuple[IStreamClientEndpoint, tuple[object, ...], IAddress]:
         """
         Create an L{TCP4ClientEndpoint} and return the values needed to verify
         its behavior.
@@ -2989,23 +2996,60 @@ class Oops(Exception):
     """
 
 
+@dataclass(eq=False)
+class TLSWrapperFactoryChecker:
+    """
+    Verify that the factory passed to the endpoint is actually being used by
+    the TLS wrapper; this will compare as equal to a wrapper using desired
+    server factory.
+    """
+
+    testCase: unittest.TestCase
+    protocolFactory: IProtocolFactory
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, TLSMemoryBIOFactory):
+            return False
+        self.testCase.assertIs(other.wrappedFactory, self.protocolFactory)
+        return True
+
+
 @skipIf(skipSSL, skipSSLReason)
 class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
     """
     Tests for TLS Endpoints.
     """
 
-    def expectedServers(self, reactor):
+    def expectedServers(
+        self, reactor: MemoryReactor
+    ) -> list[tuple[int, IProtocolFactory, int, str]]:
         """
-        @return: List of calls to L{IReactorSSL.listenSSL}
+        @return: List of calls to L{IReactorTCP.listenTCP}
         """
         return reactor.tcpServers
 
-    def expectedClients(self, reactor):
+    def satisfyPendingConnect(
+        self, connectingFactory: Any, expectedProto: object
+    ) -> None:
+        """
+        Satisfy the pending connection deferred for the wrapper factory created
+        by wrapClientTLS.
+
+        @note: This is engaging in a bit of open-box chicanery to hit a
+            particular path through the endpoint without touching the reactor,
+            and is somewhat gross as a result.
+        """
+        connectingFactory._onConnection.callback(
+            TLSMemoryBIOProtocol(connectingFactory, expectedProto)
+        )
+
+    def expectedClients(
+        self, reactor: MemoryReactor
+    ) -> Sequence[tuple[str, int, ClientFactory, int, str | None]]:
         """
         @return: List of calls to L{IReactorSSL.connectSSL}
         """
-        return reactor.sslClients
+        return reactor.tcpClients
 
     def assertConnectArgs(self, receivedArgs, expectedArgs):
         """
@@ -3015,17 +3059,17 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
         C{IStreamClientEndpoint.connect} call.
 
         @param receivedArgs: C{tuple} of (C{host}, C{port}, C{factory},
-            C{contextFactory}, C{timeout}, C{bindAddress}) that was passed to
-            L{IReactorSSL.connectSSL}.
+            C{timeout}, C{bindAddress}) that was passed to
+            L{IReactorSSL.connectTCP}.
+
         @param expectedArgs: C{tuple} of (C{host}, C{port}, C{factory},
-            C{contextFactory}, C{timeout}, C{bindAddress}) that we expect to
-            have been passed to L{IReactorSSL.connectSSL}.
+            C{timeout}, C{bindAddress}) that we expect to have been passed to
+            L{IReactorSSL.connectTCP}.
         """
         (
             host,
             port,
             ignoredFactory,
-            contextFactory,
             timeout,
             bindAddress,
         ) = receivedArgs
@@ -3034,14 +3078,12 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
             expectedHost,
             expectedPort,
             _ignoredFactory,
-            expectedContextFactory,
             expectedTimeout,
             expectedBindAddress,
         ) = expectedArgs
 
         self.assertEqual(host, expectedHost)
         self.assertEqual(port, expectedPort)
-        self.assertEqual(contextFactory, expectedContextFactory)
         self.assertEqual(timeout, expectedTimeout)
         self.assertEqual(bindAddress, expectedBindAddress)
 
@@ -3124,22 +3166,6 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
         if not getattr(testMethod, "noCertsAtAll", False):
             fp.child("stuff.pem").setContent(self.serverCert.dumpPEM())
 
-        class FactoryChecker:
-            def __eq__(iself, other: object) -> bool:
-                assert isinstance(other, TLSMemoryBIOFactory)
-                self.assertIs(other.wrappedFactory, serverFactory)
-
-                # This is a very unfortunate white-box test, but I just want to
-                # look at the *value* of the SNI configuration; given that
-                # OpenSSL hides everything internally I can't verify that we
-                # build a correct-looking connection, so instead we have to do
-                # this:
-                sorryAboutThis = other._creatorCallable.__self__  # type:ignore
-                assert isinstance(sorryAboutThis, SNIConnectionCreator)
-                self.assertIs(sorryAboutThis._configForSNI, snic)
-
-                return True
-
         return (
             endpoints.TLSServerEndpoint(
                 TCP6ServerEndpoint(reactor, address.port, **listenArgs),
@@ -3149,40 +3175,44 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
             (
                 address.port,
                 # TLSMemoryBIOFactory(snic, False, factory),
-                FactoryChecker(),
+                TLSWrapperFactoryChecker(self, serverFactory),
                 listenArgs.get("backlog", 50),
                 listenArgs.get("interface", "::"),
             ),
             address,
         )
 
-    def createClientEndpoint(self, reactor, clientFactory, **connectArgs):
+    def createClientEndpoint(
+        self, reactor: IReactorTCP, clientFactory: IProtocolFactory, **connectArgs: Any
+    ) -> tuple[IStreamClientEndpoint, tuple[object, ...], IAddress]:
         """
         Create an L{TLSClientEndpoint} and return the values needed to verify
         its behaviour.
 
-        @param reactor: A fake L{IReactorSSL} that L{TLSClientEndpoint} can
-            call L{IReactorSSL.connectSSL} on.
+        @param reactor: A fake L{IReactorTCP} that L{TLSClientEndpoint} can
+            call L{IReactorSSL.connectTCP} on.
         @param clientFactory: The thing that we expect to be passed to our
             L{IStreamClientEndpoint.connect} implementation.
         @param connectArgs: Optional dictionary of arguments to
-            L{IReactorSSL.connectSSL}
+            L{IReactorTCP.connectTCP}
         """
         address = IPv4Address("TCP", "localhost", 80)
 
         return (
-            endpoints.SSL4ClientEndpoint(
-                reactor,
-                address.host,
-                address.port,
+            endpoints.wrapClientTLS(
                 self.clientSSLContext,
-                **connectArgs,
+                endpoints.TCP4ClientEndpoint(
+                    reactor,
+                    address.host,
+                    address.port,
+                    **connectArgs,
+                ),
+                clock=IReactorTime(reactor),
             ),
             (
                 address.host,
                 address.port,
-                clientFactory,
-                self.clientSSLContext,
+                TLSWrapperFactoryChecker(self, clientFactory),
                 connectArgs.get("timeout", 30),
                 connectArgs.get("bindAddress", None),
             ),
@@ -3220,6 +3250,7 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
         self.successResultOf(ep.listen(fact))
 
         clientf = Factory.forProtocol(Protocol)
+
         cep = wrapClientTLS(
             self.clientSSLContext,
             TCP4ClientEndpoint(memr, host.host, host.port),
