@@ -3115,6 +3115,11 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
             serverServiceIdentity,
         )
         ca, server = certificatesForAuthorityAndServer(serverServiceIdentity)
+        untrustedCA, unusedCert = certificatesForAuthorityAndServer(
+            serverServiceIdentity
+        )
+        self.unusedCert = unusedCert
+
         self.serverCert = server
         shouldSendServerName = getattr(
             testMethod,
@@ -3165,7 +3170,9 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
         fp.createDirectory()
         if not getattr(testMethod, "noCertsAtAll", False):
             fp.child("stuff.pem").setContent(self.serverCert.dumpPEM())
-
+            # superclass (Certificate.dumpPEM) does not include private key in
+            # its output, just the certificate
+            fp.child("ignored.pem").setContent(Certificate.dumpPEM(self.unusedCert))
         return (
             endpoints.TLSServerEndpoint(
                 TCP6ServerEndpoint(reactor, address.port, **listenArgs),
