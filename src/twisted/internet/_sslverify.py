@@ -8,7 +8,16 @@ import warnings
 from binascii import hexlify
 from functools import lru_cache
 from hashlib import md5
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, TypeVar, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Optional,
+    Sequence,
+    TypeVar,
+    Union,
+)
 
 from zope.interface import Interface, implementer
 
@@ -28,8 +37,9 @@ from twisted.internet.interfaces import (
     IAcceptableCiphers,
     ICipher,
     IOpenSSLClientConnectionCreator,
-    IOpenSSLClientConnectionCreatorFactory,
     IOpenSSLContextFactory,
+    IOpenSSLServerConnectionCreator,
+    IProtocolNegotiationFactory,
 )
 from twisted.logger import Logger
 from twisted.python.compat import nativeString
@@ -1002,10 +1012,7 @@ def _tolerateErrors(wrapped):
     return infoCallback
 
 
-@implementer(
-    IOpenSSLClientConnectionCreatorFactory,
-    IOpenSSLClientConnectionCreator,
-)
+@implementer(IOpenSSLClientConnectionCreator)
 class ClientTLSOptions:
     """
     Client creator for TLS.
@@ -1057,7 +1064,6 @@ class ClientTLSOptions:
         Initialize L{ClientTLSOptions}.
 
         @param hostname: The hostname to verify as input by a human.
-        @type hostname: L{unicode}
 
         @param createContext: A function that will create an SSL context.
 
@@ -1093,8 +1099,6 @@ class ClientTLSOptions:
         """
         Clone this L{ClientTLSOptions} to create a new
         L{IOpenSSLClientConnectionCreator} with the specified parameters.
-
-        @see: L{IOpenSSLClientConnectionCreatorFactory}
 
         @return: A clone of this L{ClientTLSOptions} with
             C{connectionSetupHook} and C{contextSetupHook} modified with the
@@ -1172,7 +1176,7 @@ def optionsForClientTLS(
     hostname: str,
     trustRoot: Optional[Union[IOpenSSLTrustRoot, Certificate]] = None,
     clientCertificate: Optional[PrivateCertificate] = None,
-    acceptableProtocols: Optional[List[bytes]] = None,
+    acceptableProtocols: Optional[Sequence[bytes]] = None,
     *,
     extraCertificateOptions: Optional[dict[str, Any]] = None,
     sendServerName: bool | None = None,
@@ -1223,7 +1227,6 @@ def optionsForClientTLS(
         means always send, and C{False} means never send.
 
     @return: A client connection creator.
-    @rtype: L{IOpenSSLClientConnectionCreator}
     """
     if extraCertificateOptions is None:
         extraCertificateOptions = {}
@@ -1239,22 +1242,28 @@ def optionsForClientTLS(
             privateKey=clientCertificate.privateKey.original,
             certificate=clientCertificate.original,
         )
+
     certificateOptions = OpenSSLCertificateOptions(
         trustRoot=trustRoot,
         acceptableProtocols=acceptableProtocols,
         **extraCertificateOptions,
     )
+
     return ClientTLSOptions(
         hostname,
         None,
-        certificateOptions.getContext,
+        certificateOptions._makeContext,
         lambda _: None,
         lambda _: None,
         sendServerName,
     )
 
 
-@implementer(IOpenSSLContextFactory)
+@implementer(
+    IOpenSSLServerConnectionCreator,
+    IOpenSSLClientConnectionCreator,
+    IOpenSSLContextFactory,
+)
 class OpenSSLCertificateOptions:
     """
     A L{CertificateOptions <twisted.internet.ssl.CertificateOptions>} specifies
@@ -1467,6 +1476,9 @@ class OpenSSLCertificateOptions:
         self.privateKey = privateKey
         self.certificate = certificate
 
+        # Cached generated contexts by their acceptable protocols lists
+        self._ctxCache: dict[tuple[bytes, ...], SSL.Context] = {}
+
         # Set basic security options: disallow insecure SSLv2, disallow TLS
         # compression to avoid CRIME attack, make the server choose the
         # ciphers.
@@ -1614,13 +1626,58 @@ class OpenSSLCertificateOptions:
     def __setstate__(self, state):
         self.__dict__ = state
 
+    @deprecated(
+        Version("Twisted", "NEXT", 0, 0),
+        "CertificateOptions.serverConnectionForTLS",
+    )
     def getContext(self) -> SSL.Context:
         """
-        Return an L{OpenSSL.SSL.Context} object.
+        Create and cache an L{SSL.Context} based on the parameters in this
+        L{OpenSSLCertificateOptions}.
+
+        This is deprecated because it returns a cached, shared context which
+        cannot safely be shared, because the acceptable protocols may be
+        mutated.
         """
         if self._context is None:
             self._context = self._makeContext()
         return self._context
+
+    def serverConnectionForTLS(self, protocol: TLSMemoryBIOProtocol) -> SSL.Connection:
+        return self._makeTLSConnection(protocol)
+
+    def clientConnectionForTLS(self, protocol: TLSMemoryBIOProtocol) -> SSL.Connection:
+        return self._makeTLSConnection(protocol)
+
+    def _makeTLSConnection(self, protocol: TLSMemoryBIOProtocol) -> SSL.Connection:
+        """
+        construct a server connection
+        """
+        tlsFactory = protocol.factory
+        assert tlsFactory is not None
+        ipnf = IProtocolNegotiationFactory(tlsFactory.wrappedFactory, None)
+        apkey = tuple(self._acceptableProtocols or ())
+
+        if ipnf is not None:
+            apkey = tuple(ipnf.acceptableProtocols()) + apkey
+
+        if self._context is None:
+            if apkey in self._ctxCache:
+                ctx = self._ctxCache[apkey]
+
+            else:
+                ctx = self._makeContext()
+                if apkey:
+                    _setAcceptableProtocols(ctx, apkey)
+                self._ctxCache[apkey] = ctx
+        else:
+            ctx = self._context
+            if apkey:
+                # NB: this is necessary for backwards compatibilty, but it is
+                # inherently unsafe.
+
+                _setAcceptableProtocols(ctx, apkey)
+        return Connection(ctx)
 
     def _makeContext(self) -> SSL.Context:
         ctx = self._contextFactory(self.method)
@@ -1953,14 +2010,14 @@ class OpenSSLDiffieHellmanParameters:
 
 
 def _makeSelectionCallback(
-    acceptableProtocols: list[bytes],
-) -> Callable[[Connection, list[bytes]], bytes]:
+    acceptableProtocols: Sequence[bytes],
+) -> Callable[[Connection, Sequence[bytes]], bytes]:
     """
     Create a callback to make a selection from the given list of acceptable
     protocols and the list of acceptable protocols communicated by the peer.
     """
 
-    def protoSelectCallback(conn: Connection, protocols: list[bytes]) -> bytes:
+    def protoSelectCallback(conn: Connection, protocols: Sequence[bytes]) -> bytes:
         """
         ALPN server-side callback used to select the next protocol.  Prefers
         protocols found earlier in C{_acceptableProtocols}.
@@ -1971,6 +2028,7 @@ def _makeSelectionCallback(
 
         @return: the selected protocol.
         """
+
         overlap = set(protocols) & set(acceptableProtocols)
 
         for p in acceptableProtocols:
@@ -1986,7 +2044,7 @@ def _makeSelectionCallback(
 
 
 def _setAcceptableProtocols(
-    context: SSL.Context, acceptableProtocols: list[bytes]
+    context: SSL.Context, acceptableProtocols: Sequence[bytes]
 ) -> None:
     """
     Called to set up the L{OpenSSL.SSL.Context} for doing ALPN negotiation.
@@ -2005,16 +2063,9 @@ def _setAcceptableProtocols(
         established, but no protocol will be negotiated.  Protocols earlier in
         the list are preferred over those later in the list.
     """
-
-    # If we don't actually have protocols to negotiate, don't set anything up.
-    # Depending on OpenSSL version, failing some of the selection callbacks can
-    # cause the handshake to fail, which is presumably not what was intended
-    # here.
-    if not acceptableProtocols:
-        return
-
-    supported = protocolNegotiationMechanisms()
-
-    if supported & ProtocolNegotiationSupport.ALPN:
+    if (
+        acceptableProtocols
+        and protocolNegotiationMechanisms() & ProtocolNegotiationSupport.ALPN
+    ):
         context.set_alpn_select_callback(_makeSelectionCallback(acceptableProtocols))
         context.set_alpn_protos(acceptableProtocols)

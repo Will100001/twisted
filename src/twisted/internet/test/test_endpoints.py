@@ -128,10 +128,7 @@ try:
         PrivateCertificate,
         optionsForClientTLS,
     )
-    from twisted.protocols._sni import (
-        ServerNameIndicationConfiguration,
-        SNIConnectionCreator,
-    )
+    from twisted.protocols._sni import SNIConnectionCreator
     from twisted.protocols.tls import TLSMemoryBIOFactory, TLSMemoryBIOProtocol
     from twisted.test.test_sslverify import (
         certificatesForAuthorityAndServer,
@@ -3164,7 +3161,6 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
             if not getattr(testMethod, "brokenSNILookup", False)
             else oopsie
         )
-        snic = ServerNameIndicationConfiguration(lookupper)
         if not getattr(testMethod, "noCertsAtAll", False):
             self.certificatesDirectory.child("stuff.pem").setContent(
                 self.serverCert.dumpPEM()
@@ -3172,12 +3168,11 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
         return (
             endpoints.TLSServerEndpoint(
                 TCP6ServerEndpoint(reactor, address.port, **listenArgs),
-                snic,
+                SNIConnectionCreator(lookupper),
                 clock=IReactorTime(reactor),
             ),
             (
                 address.port,
-                # TLSMemoryBIOFactory(snic, False, factory),
                 TLSWrapperFactoryChecker(self, serverFactory),
                 listenArgs.get("backlog", 50),
                 listenArgs.get("interface", "::"),
@@ -3672,7 +3667,7 @@ class ServerStringTests(unittest.TestCase):
         self.assertEqual(subendpoint._backlog, 12)
         self.assertEqual(subendpoint._interface, "10.0.0.1")
         ctx = server.contextFactory
-        self.assertIsInstance(ctx, endpoints.ServerNameIndicationConfiguration)
+        self.assertIsInstance(ctx, endpoints.SNIConnectionCreator)
 
         def cxnSetup(cxn: Connection) -> None:
             ...

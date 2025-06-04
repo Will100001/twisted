@@ -1579,7 +1579,6 @@ class TLSProducerTests(TestCase):
         expectedMessage = (
             "extremely old style context factory does not explicitly provide "
             "any OpenSSL connection-creator Client interface; neither "
-            "IOpenSSLClientConnectionCreatorFactory, nor "
             "IOpenSSLClientConnectionCreator, nor IOpenSSLContextFactory."
         )
         self.assertWarns(LegacyContextFactoryWarning, expectedMessage, __file__, f)
@@ -1627,7 +1626,6 @@ class TLSProducerTests(TestCase):
             (
                 "has get context but broken does not explicitly provide any "
                 "OpenSSL connection-creator Client interface; neither "
-                "IOpenSSLClientConnectionCreatorFactory, nor "
                 "IOpenSSLClientConnectionCreator, nor IOpenSSLContextFactory."
             ),
             __file__,
@@ -1638,7 +1636,6 @@ class TLSProducerTests(TestCase):
             (
                 "just broken does not explicitly provide any OpenSSL "
                 "connection-creator Client interface; neither "
-                "IOpenSSLClientConnectionCreatorFactory, nor "
                 "IOpenSSLClientConnectionCreator, nor IOpenSSLContextFactory."
             ),
             __file__,

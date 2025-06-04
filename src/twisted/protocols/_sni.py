@@ -17,7 +17,6 @@ from twisted.internet.defer import Deferred
 from twisted.internet.interfaces import (
     IListeningPort,
     IOpenSSLServerConnectionCreator,
-    IOpenSSLServerConnectionCreatorFactory,
     IProtocolFactory,
     IReactorTime,
     IStreamServerEndpoint,
@@ -40,12 +39,10 @@ log = Logger()
 @implementer(IOpenSSLServerConnectionCreator)
 @dataclass
 class SNIConnectionCreator(object):
-    _configForSNI: ServerNameIndicationConfiguration
-    _connectionSetupHook: Callable[[Connection], None]
-    _contextSetupHook: Callable[[Context], None]
+    _contextLookup: Callable[[bytes | None], Context | None]
 
     def _lookupContext(self, name: bytes | None) -> Context:
-        ctxLookup = self._configForSNI._contextLookup
+        ctxLookup = self._contextLookup
         candidate = ctxLookup(name)
         if candidate is None:
             if name is not None:
@@ -58,9 +55,7 @@ class SNIConnectionCreator(object):
 
         if candidate is None:
             log.warn("no server certificate for name {name!r}", name=name)
-            self._contextSetupHook(fallbackCtx := Context(TLS_METHOD))
-            return fallbackCtx
-        self._contextSetupHook(candidate)
+            return Context(TLS_METHOD)
         return candidate
 
     @cached_property
@@ -92,34 +87,7 @@ class SNIConnectionCreator(object):
 
         @return: a newly-created connection.
         """
-        newConnection = Connection(self.defaultContext)
-        self._connectionSetupHook(newConnection)
-        return newConnection
-
-
-@implementer(IOpenSSLServerConnectionCreatorFactory)
-@dataclass
-class ServerNameIndicationConfiguration:
-    """
-    L{ServerNameIndicationConfiguration} is an
-    L{IOpenSSLServerConnectionCreatorFactory} that creates server connections
-    according to a lookup function that can translate a server name specified
-    by a client into a L{Context}.
-    """
-
-    _contextLookup: Callable[[bytes | None], Context | None]
-
-    def createServerCreator(
-        self,
-        connectionSetupHook: Callable[[Connection], None],
-        contextSetupHook: Callable[[Context], None],
-    ) -> IOpenSSLServerConnectionCreator:
-        """
-        Create an L{SNIConnectionCreator} configured with the C{contextLookup}
-        passed to this L{ServerNameIndicationConfiguration} when it was
-        constructed.
-        """
-        return SNIConnectionCreator(self, connectionSetupHook, contextSetupHook)
+        return Connection(self.defaultContext)
 
 
 @implementer(IStreamServerEndpoint)

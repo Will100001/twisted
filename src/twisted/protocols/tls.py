@@ -42,17 +42,9 @@ from typing import Callable, Iterable, Optional, cast
 
 from zope.interface import directlyProvides, implementer, providedBy
 
-from OpenSSL.SSL import (
-    Connection,
-    Context,
-    Error,
-    SysCallError,
-    WantReadError,
-    ZeroReturnError,
-)
+from OpenSSL.SSL import Error, SysCallError, WantReadError, ZeroReturnError
 
 from twisted.internet._producer_helpers import _PullToPush
-from twisted.internet._sslverify import _setAcceptableProtocols
 from twisted.internet.interfaces import (
     IDelayedCall,
     IHandshakeListener,
@@ -60,7 +52,6 @@ from twisted.internet.interfaces import (
     INegotiated,
     IProtocol,
     IProtocolFactory,
-    IProtocolNegotiationFactory,
     IPushProducer,
     IReactorTime,
     ISystemHandle,
@@ -194,6 +185,7 @@ class TLSMemoryBIOProtocol(ProtocolWrapper):
     _lostTLSConnection = False
     _producer = None
     _aborted = False
+    factory: TLSMemoryBIOFactory
 
     def __init__(self, factory, wrappedProtocol, _connectWrapped=True):
         ProtocolWrapper.__init__(self, factory, wrappedProtocol)
@@ -605,14 +597,6 @@ class TLSMemoryBIOProtocol(ProtocolWrapper):
             self._shutdownTLS()
 
 
-def _serverConnectionHook(connection: Connection) -> None:
-    connection.set_accept_state()
-
-
-def _clientConnectionHook(connection: Connection) -> None:
-    connection.set_connect_state()
-
-
 class _AggregateSmallWrites:
     """
     Aggregate small writes so they get written in large batches.
@@ -787,23 +771,7 @@ class TLSMemoryBIOFactory(WrappingFactory):
         """
         WrappingFactory.__init__(self, wrappedFactory)
 
-        if IProtocolNegotiationFactory.providedBy(self.wrappedFactory):
-
-            def contextHook(context: Context) -> None:
-                protocols = self.wrappedFactory.acceptableProtocols()
-                _setAcceptableProtocols(context, protocols)
-
-        else:
-
-            def contextHook(context: Context) -> None:
-                pass
-
-        self._creatorCallable = _convertToAppropriateFactory(
-            isClient,
-            contextFactory,
-            _clientConnectionHook if isClient else _serverConnectionHook,
-            contextHook,
-        )
+        self._creatorCallable = _convertToAppropriateFactory(isClient, contextFactory)
 
         if clock is None:
             clock = _get_default_clock()

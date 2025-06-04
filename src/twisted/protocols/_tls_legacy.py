@@ -1,6 +1,8 @@
+# -*- test-case-name: twisted.internet.test.test_endpoints.TLSEndpointsTests -*-
 """
 Handler for the various legacy things that a C{contextFactory} can be.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable, Union
@@ -10,10 +12,8 @@ from OpenSSL.SSL import Connection, Context
 
 from twisted.internet.interfaces import (
     IOpenSSLClientConnectionCreator,
-    IOpenSSLClientConnectionCreatorFactory,
     IOpenSSLContextFactory,
     IOpenSSLServerConnectionCreator,
-    IOpenSSLServerConnectionCreatorFactory,
 )
 
 if TYPE_CHECKING:
@@ -23,17 +23,7 @@ if TYPE_CHECKING:
 SomeConnectionCreator = Union[
     IOpenSSLContextFactory,
     IOpenSSLClientConnectionCreator,
-    IOpenSSLClientConnectionCreatorFactory,
     IOpenSSLServerConnectionCreator,
-    IOpenSSLServerConnectionCreatorFactory,
-]
-
-
-ConnectionHook = Callable[[Connection], None]
-ContextHook = Callable[[Context], None]
-CreatorFactory = Callable[
-    [ConnectionHook, ContextHook],
-    Connection,
 ]
 
 
@@ -46,32 +36,7 @@ class LegacyContextFactoryWarning(Warning):
     """
 
 
-def old(
-    oldMethod: SingleArgFactory,
-    connectionSetup: ConnectionHook,
-    contextSetup: ContextHook,
-) -> SingleArgFactory:
-    """
-    Compatibility shim for (client/server)ConnectionForTLS to
-    create(Client/Server)Creator signature.
-    """
-
-    def convert(p: TLSMemoryBIOProtocol) -> Connection:
-        connection = oldMethod(p)
-        connectionSetup(connection)
-        # NB: context setup needs to run *first*, and thus this is a bit of a
-        # doomed scenario.
-        contextSetup(connection.get_context())
-        return connection
-
-    return convert
-
-
-def older(
-    olderMethod: Callable[[], Context],
-    connectionSetup: ConnectionHook,
-    contextSetup: ContextHook,
-) -> SingleArgFactory:
+def older(olderMethod: Callable[[], Context]) -> SingleArgFactory:
     """
     Compatibility shim for L{IOpenSSLContextFactory.getContext}-style method to
     create(Client/Server)Creator.
@@ -79,20 +44,13 @@ def older(
 
     def convert(p: TLSMemoryBIOProtocol) -> Connection:
         context = olderMethod()
-        contextSetup(context)
         connection = Connection(context, None)
-        connectionSetup(connection)
         return connection
 
     return convert
 
 
-def oldest(
-    isClient: bool,
-    creator: object,
-    connectionSetup: ConnectionHook,
-    contextSetup: ContextHook,
-) -> SingleArgFactory:
+def oldest(isClient: bool, creator: object) -> SingleArgFactory:
     """
     Comptibility shim that does largely the same thing as L{older} but for
     things that don't even properly implement the old-style interface; check
@@ -102,9 +60,8 @@ def oldest(
     itype = "Client" if isClient else "Server"
     warn(
         f"{creator} does not explicitly provide any OpenSSL connection-"
-        f"creator {itype} interface; "
-        f"neither IOpenSSL{itype}ConnectionCreatorFactory, nor IOpenSSL"
-        f"{itype}ConnectionCreator, nor IOpenSSLContextFactory.",
+        f"creator {itype} interface; neither IOpenSSL{itype}ConnectionCreator,"
+        f" nor IOpenSSLContextFactory.",
         LegacyContextFactoryWarning,
         stacklevel=4,
     )
@@ -113,38 +70,40 @@ def oldest(
         raise TypeError(f"{creator} does not even have a `getContext` method")
     if not isinstance(getContext(), Context):
         raise TypeError(f"{creator}'s `getContext` method doesn't return a `Context`")
-    return older(getContext, connectionSetup, contextSetup)
+    return older(getContext)
 
 
 def _convertToAppropriateFactory(
-    isClient: bool,
-    creator: SomeConnectionCreator,
-    connectionSetup: ConnectionHook,
-    contextSetup: ContextHook,
+    isClient: bool, creator: SomeConnectionCreator
 ) -> SingleArgFactory:
     """
     Upgrade a connection creator / context-factory-ish object into something
     with a signature like the most recent interface for building OpenSSL
-    context objects (L{IOpenSSLClientConnectionCreatorFactory}), accounting for
-    all the various interfaces older versions of Twisted used for context
-    configuration.
+    connection objects (i.e. like the methods on
+    L{IOpenSSLClientConnectionCreator} and L{IOpenSSLServerConnectionCreator}),
+    accounting for all the various interfaces older versions of Twisted used
+    for context configuration.
     """
+    baseCallable = (
+        creator.clientConnectionForTLS
+        if (isClient and IOpenSSLClientConnectionCreator.providedBy(creator))
+        else (
+            creator.serverConnectionForTLS
+            if ((not isClient) and IOpenSSLServerConnectionCreator.providedBy(creator))
+            else (
+                older(creator.getContext)
+                if IOpenSSLContextFactory.providedBy(creator)
+                else oldest(isClient, creator)
+            )
+        )
+    )
 
-    if isClient:
-        if IOpenSSLClientConnectionCreatorFactory.providedBy(creator):
-            return creator.createClientCreator(
-                connectionSetup, contextSetup
-            ).clientConnectionForTLS
-        if IOpenSSLClientConnectionCreator.providedBy(creator):
-            return old(creator.clientConnectionForTLS, connectionSetup, contextSetup)
-    else:
-        if IOpenSSLServerConnectionCreatorFactory.providedBy(creator):
-            return creator.createServerCreator(
-                connectionSetup, contextSetup
-            ).serverConnectionForTLS
-        if IOpenSSLServerConnectionCreator.providedBy(creator):
-            return old(creator.serverConnectionForTLS, connectionSetup, contextSetup)
-    if IOpenSSLContextFactory.providedBy(creator):
-        return older(creator.getContext, connectionSetup, contextSetup)
+    def connectionFactory(protocol: TLSMemoryBIOProtocol) -> Connection:
+        connection = baseCallable(protocol)
+        if isClient:
+            connection.set_connect_state()
+        else:
+            connection.set_accept_state()
+        return connection
 
-    return oldest(isClient, creator, connectionSetup, contextSetup)
+    return connectionFactory
