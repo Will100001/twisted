@@ -52,7 +52,6 @@ from twisted.internet.interfaces import (
     IStreamServerEndpointStringParser,
 )
 from twisted.internet.protocol import ClientFactory, Factory, ProcessProtocol, Protocol
-from twisted.protocols._sni import SNIConnectionCreator
 
 try:
     from twisted.internet.stdio import PipeAddress, StandardIO
@@ -87,7 +86,11 @@ else:
         optionsForClientTLS,
         trustRootFromCertificates,
     )
-    from twisted.protocols._sni import TLSServerEndpoint, autoReloadingDirectoryOfPEMs
+    from twisted.protocols._sni import (
+        SNIConnectionCreator,
+        TLSServerEndpoint,
+        autoReloadingDirectoryOfPEMs,
+    )
     from twisted.protocols.tls import TLSMemoryBIOFactory as _TLSMemoryBIOFactory
 
     TLSMemoryBIOFactory = _TLSMemoryBIOFactory

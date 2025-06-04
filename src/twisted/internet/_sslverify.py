@@ -1056,8 +1056,6 @@ class ClientTLSOptions:
         hostname: str,
         context: Optional[SSL.Context],
         createContext: Callable[[], SSL.Context],
-        configureContext: Callable[[SSL.Context], None],
-        configureConnection: Callable[[SSL.Connection], None],
         sendServerName: bool | None = None,
     ) -> None:
         """
@@ -1085,33 +1083,9 @@ class ClientTLSOptions:
         self._hostnameASCII = self._hostnameBytes.decode("ascii")
         self._ctx = context
         self._createContext = createContext
-        self._configureContext = configureContext
-        self._configureConnection = configureConnection
         if sendServerName is None:
             sendServerName = self._hostnameIsDnsName
         self._sendServerName = sendServerName
-
-    def createClientCreator(
-        self,
-        connectionSetupHook: Callable[[SSL.Connection], None],
-        contextSetupHook: Callable[[SSL.Context], None],
-    ) -> IOpenSSLClientConnectionCreator:
-        """
-        Clone this L{ClientTLSOptions} to create a new
-        L{IOpenSSLClientConnectionCreator} with the specified parameters.
-
-        @return: A clone of this L{ClientTLSOptions} with
-            C{connectionSetupHook} and C{contextSetupHook} modified with the
-            given ones.
-        """
-        return ClientTLSOptions(
-            self._hostname,
-            None,
-            self._createContext,
-            contextSetupHook,
-            connectionSetupHook,
-            self._sendServerName,
-        )
 
     def clientConnectionForTLS(self, tlsProtocol: TLSMemoryBIOProtocol) -> Connection:
         """
@@ -1123,7 +1097,6 @@ class ClientTLSOptions:
         """
         if self._ctx is None:
             self._ctx = self._createContext()
-            self._configureContext(self._ctx)
         context = self._ctx
         connection = SSL.Connection(context, None)
         # Literal IPv4 and IPv6 addresses are not permitted
@@ -1132,7 +1105,6 @@ class ClientTLSOptions:
             connection.set_tlsext_host_name(self._hostnameBytes)
         callback = _verifyCB(tlsProtocol, self._hostnameIsDnsName, self._hostnameASCII)
         connection.set_verify(VERIFY_PEER | VERIFY_FAIL_IF_NO_PEER_CERT, callback)
-        self._configureConnection(connection)
         return connection
 
 
@@ -1250,12 +1222,7 @@ def optionsForClientTLS(
     )
 
     return ClientTLSOptions(
-        hostname,
-        None,
-        certificateOptions._makeContext,
-        lambda _: None,
-        lambda _: None,
-        sendServerName,
+        hostname, None, certificateOptions._makeContext, sendServerName
     )
 
 
@@ -1476,9 +1443,6 @@ class OpenSSLCertificateOptions:
         self.privateKey = privateKey
         self.certificate = certificate
 
-        # Cached generated contexts by their acceptable protocols lists
-        self._ctxCache: dict[tuple[bytes, ...], SSL.Context] = {}
-
         # Set basic security options: disallow insecure SSLv2, disallow TLS
         # compression to avoid CRIME attack, make the server choose the
         # ciphers.
@@ -1644,39 +1608,37 @@ class OpenSSLCertificateOptions:
         return self._context
 
     def serverConnectionForTLS(self, protocol: TLSMemoryBIOProtocol) -> SSL.Connection:
+        """
+        Construct a TLS connection for the server.
+        """
         return self._makeTLSConnection(protocol)
 
     def clientConnectionForTLS(self, protocol: TLSMemoryBIOProtocol) -> SSL.Connection:
+        """
+        Construct a TLS connection for the client.
+        """
         return self._makeTLSConnection(protocol)
 
     def _makeTLSConnection(self, protocol: TLSMemoryBIOProtocol) -> SSL.Connection:
         """
-        construct a server connection
+        Construct an OpenSSL Connection for either client or server.
         """
         tlsFactory = protocol.factory
         assert tlsFactory is not None
         ipnf = IProtocolNegotiationFactory(tlsFactory.wrappedFactory, None)
-        apkey = tuple(self._acceptableProtocols or ())
-
+        allAcceptableProtocols = tuple(self._acceptableProtocols or ())
         if ipnf is not None:
-            apkey = tuple(ipnf.acceptableProtocols()) + apkey
-
+            allAcceptableProtocols = (
+                tuple(ipnf.acceptableProtocols()) + allAcceptableProtocols
+            )
         if self._context is None:
-            if apkey in self._ctxCache:
-                ctx = self._ctxCache[apkey]
-
-            else:
-                ctx = self._makeContext()
-                if apkey:
-                    _setAcceptableProtocols(ctx, apkey)
-                self._ctxCache[apkey] = ctx
+            ctx = self._makeContext()
         else:
+            # Note that combining this case - where getContext() causes the
+            # context object to be cached & shared among multiple connections -
+            # with acceptableProtocols is fundamentally sharing state.
             ctx = self._context
-            if apkey:
-                # NB: this is necessary for backwards compatibilty, but it is
-                # inherently unsafe.
-
-                _setAcceptableProtocols(ctx, apkey)
+        _setAcceptableProtocols(ctx, allAcceptableProtocols)
         return Connection(ctx)
 
     def _makeContext(self) -> SSL.Context:

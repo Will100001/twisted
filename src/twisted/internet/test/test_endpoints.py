@@ -113,7 +113,6 @@ try:
     from OpenSSL.crypto import FILETYPE_PEM
     from OpenSSL.SSL import (
         TLS_METHOD,
-        Connection,
         Context,
         Context as ContextType,
         OP_NO_SSLv3,
@@ -3668,15 +3667,6 @@ class ServerStringTests(unittest.TestCase):
         self.assertEqual(subendpoint._interface, "10.0.0.1")
         ctx = server.contextFactory
         self.assertIsInstance(ctx, endpoints.SNIConnectionCreator)
-
-        def cxnSetup(cxn: Connection) -> None:
-            ...
-
-        def ctxSetup(ctx: Context) -> None:
-            ...
-
-        sc: SNIConnectionCreator = ctx.createServerCreator(cxnSetup, ctxSetup)
-        self.assertIsInstance(sc, SNIConnectionCreator)
         factory = TLSMemoryBIOFactory(ctx, False, Factory.forProtocol(Protocol))
         proto = factory.buildProtocol(IPv4Address("TCP", "127.0.0.1", 1234))
         st = StringTransport()

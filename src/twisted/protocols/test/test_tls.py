@@ -1419,9 +1419,6 @@ class TLSProducerTests(TestCase):
                 self.l.append(data)
                 return len(data)
 
-            def get_context(self):
-                pass
-
             def set_connect_state(self):
                 pass
 
