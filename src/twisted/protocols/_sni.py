@@ -39,19 +39,31 @@ log = Logger()
 @implementer(IOpenSSLServerConnectionCreator)
 @dataclass
 class SNIConnectionCreator(object):
+    """
+    (Private) L{IOpenSSLServerConnectionCreator} implementation that creates an
+    OpenSSL connection with a context that will switch to the appropriate one.
+    """
+
     _contextLookup: Callable[[bytes | None], Context | None]
+    """
+    This method should look up an OpenSSL Context object for the given DNS
+    name, or one that is suitable for unidentified clients.  The lookup may
+    fail and return None.
+    """
 
     def _lookupContext(self, name: bytes | None) -> Context:
+        """
+        Look up an OpenSSL context for the given domain name, or construct a
+        default one suitable for bootstrapping the connection.
+        """
         ctxLookup = self._contextLookup
         candidate = ctxLookup(name)
         if candidate is None:
             if name is not None:
-                # coverage v
                 segments = name.split(b".")
                 segments[0] = b"*"
                 wildcardName = b".".join(segments)
                 candidate = ctxLookup(wildcardName)
-                # coverage ^
 
         if candidate is None:
             log.warn("no server certificate for name {name!r}", name=name)
@@ -60,6 +72,22 @@ class SNIConnectionCreator(object):
 
     @cached_property
     def defaultContext(self) -> Context:
+        """
+        Create and cache the OpenSSL context that connections will initially be
+        using.  This constructs a default context which doesn't know its domain
+        name by delegating to C{self._contextLookup} with None, then sets the
+        TLS extension servername callback to get invoked to I{switch} contexts
+        by doing another lookup when the client sends its servername.
+
+        @note: The client I{might} never send a servername at all, in which
+            case it will be stuck.  This edge case is not handled particularly
+            well right now.  Handling it better would involve some changes in
+            this code (to hook the handshake completion callback rather than
+            just the servername callback) as well as better ability to
+            customize which certificate produces the default context in the
+            implementation of C{_contextLookup}, which is to say, mostly
+            L{PEMObjects}.
+        """
         defaultContext = self._lookupContext(None)
 
         def selectContext(connection: Connection) -> None:
@@ -81,7 +109,9 @@ class SNIConnectionCreator(object):
         protocol: TLSMemoryBIOProtocol,
     ) -> Connection:
         """
-        Construct an OpenSSL server connection.
+        Construct an OpenSSL server connection that can react to the TLS
+        servername callback to select an appropriate certificate based on a
+        mapping.
 
         @param protocol: The protocol initiating a TLS connection.
 
@@ -92,19 +122,37 @@ class SNIConnectionCreator(object):
 
 @implementer(IStreamServerEndpoint)
 class TLSServerEndpoint(object):
+    """
+    A wrapper L{IStreamServerEndpoint} that can run TLS over an arbitrary other
+    L{IStreamServerEndpoint} (most commonly, TCP).
+    """
+
     def __init__(
         self,
         endpoint: IStreamServerEndpoint,
-        contextFactory: SomeConnectionCreator,
+        connectionCreator: SomeConnectionCreator,
         clock: IReactorTime | None = None,
     ) -> None:
+        """
+        @param endpoint: the endpoint to run over.
+
+        @param connectionCreator: The object that will construct OpenSSL
+            connections (or Contexts).
+
+        @param clock: The clock which will be used to schedule buffer flushes.
+        """
         self.endpoint = endpoint
-        self.contextFactory = contextFactory
+        self.connectionCreator = connectionCreator
         self.clock = clock
 
     def listen(self, factory: IProtocolFactory) -> Deferred[IListeningPort]:
+        """
+        Begin listening with the given factory.
+        """
         return self.endpoint.listen(
-            TLSMemoryBIOFactory(self.contextFactory, False, factory, clock=self.clock)
+            TLSMemoryBIOFactory(
+                self.connectionCreator, False, factory, clock=self.clock
+            )
         )
 
 
