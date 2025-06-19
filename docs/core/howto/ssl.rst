@@ -9,7 +9,8 @@ It assumes that you know what TLS is, what some of the major reasons to use it a
 It also assumes that you are comfortable with creating TCP servers and clients as described in the :doc:`server howto <servers>` and :doc:`client howto <clients>` .
 After reading this document you should be able to create servers and clients that can use TLS to encrypt their connections, switch from using an unencrypted channel to an encrypted one mid-connection, and require client authentication.
 
-Using TLS in Twisted requires that you have `pyOpenSSL <https://github.com/pyca/pyopenssl>`_ installed. A quick test to verify that you do is to run ``from OpenSSL import SSL`` at a python prompt and not get an error.
+Using TLS in Twisted requires that you have various dependencies installed that are included in Twisted's ``tls`` optional dependency group.
+To ensure that you have the required additional libraries installed, please ``pip install 'twisted[tls]'`` .
 
 Twisted provides TLS support as a transport --- that is, as an alternative to TCP.
 When using TLS, use of the TCP APIs you're already familiar with, ``TCP4ClientEndpoint`` and ``TCP4ServerEndpoint`` --- or ``reactor.listenTCP`` and ``reactor.connectTCP`` --- is replaced by use of parallel TLS APIs (many of which still use the legacy name "SSL" due to age and/or compatibility with older APIs).
@@ -119,37 +120,6 @@ For example:
    To *properly* validate your ``hostname`` parameter according to RFC6125, please also install the `"service_identity" <https://pypi.python.org/pypi/service_identity>`_ and `"idna" <https://pypi.python.org/pypi/idna>`_ packages from PyPI.
    Without this package, Twisted will currently make a conservative guess as to the correctness of the server's certificate, but this will reject a large number of potentially valid certificates.
    `service_identity` implements the standard correctly and it will be a required dependency for TLS in a future release of Twisted.
-
-Using startTLS
---------------
-
-If you want to switch from unencrypted to encrypted traffic
-mid-connection, you'll need to turn on TLS with :py:meth:`startTLS <twisted.internet.interfaces.ITLSTransport.startTLS>` on both
-ends of the connection at the same time via some agreed-upon signal like the
-reception of a particular message. You can readily verify the switch to an
-encrypted channel by examining the packet payloads with a tool like
-`Wireshark <https://www.wireshark.org/>`_ .
-
-startTLS server
-~~~~~~~~~~~~~~~
-
-:download:`starttls_server.py <../examples/starttls_server.py>`
-
-.. literalinclude:: ../examples/starttls_server.py
-
-startTLS client
-~~~~~~~~~~~~~~~
-
-:download:`starttls_client.py <../examples/starttls_client.py>`
-
-.. literalinclude:: ../examples/starttls_client.py
-
-``startTLS`` is a transport method that gets passed a ``contextFactory``.
-It is invoked at an agreed-upon time in the data reception method of the client and server protocols.
-The server uses ``PrivateCertificate.options`` to create a ``contextFactory`` which will use a particular certificate and private key (a common requirement for TLS servers).
-
-The client creates an uncustomized ``CertificateOptions`` which is all that's necessary for a TLS client to interact with a TLS server.
-
 
 Client authentication
 ---------------------
@@ -283,6 +253,35 @@ In this case, the protocol that should be used is whatever protocol would have b
 
 An example of using this functionality can be found in :download:`this example script for clients </core/examples/tls_alpn_client.py>` and :download:`this example script for servers </core/examples/tls_alpn_server.py>`.
 
+Using startTLS
+--------------
+
+If you want to switch from unencrypted to encrypted traffic
+mid-connection, you'll need to turn on TLS with :py:meth:`startTLS <twisted.internet.interfaces.ITLSTransport.startTLS>` on both
+ends of the connection at the same time via some agreed-upon signal like the
+reception of a particular message. You can readily verify the switch to an
+encrypted channel by examining the packet payloads with a tool like
+`Wireshark <https://www.wireshark.org/>`_ .
+
+startTLS server
+~~~~~~~~~~~~~~~
+
+:download:`starttls_server.py <../examples/starttls_server.py>`
+
+.. literalinclude:: ../examples/starttls_server.py
+
+startTLS client
+~~~~~~~~~~~~~~~
+
+:download:`starttls_client.py <../examples/starttls_client.py>`
+
+.. literalinclude:: ../examples/starttls_client.py
+
+``startTLS`` is a transport method that gets passed a ``contextFactory``.
+It is invoked at an agreed-upon time in the data reception method of the client and server protocols.
+The server uses ``PrivateCertificate.options`` to create a ``contextFactory`` which will use a particular certificate and private key (a common requirement for TLS servers).
+
+The client creates an uncustomized ``CertificateOptions`` which is all that's necessary for a TLS client to interact with a TLS server.
 
 Related facilities
 ------------------
