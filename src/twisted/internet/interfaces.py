@@ -2385,7 +2385,7 @@ class INegotiated(ISSLTransport):
         C{negotiatedProtocol} will be the name of the selected protocol as
         C{bytes}.  Until the TLS handshake has completed, this property may
         incorrectly return L{None}: wait until data has been received before
-        trusting it.  See U{https://twistedmatrix.com/trac/ticket/6024}.
+        trusting it.  See U{https://github.com/twisted/twisted/issues/6024}.
         """
     )
 
