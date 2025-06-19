@@ -1137,6 +1137,10 @@ def _verifyCB(
                 assert weakProtoRef is not None
                 weakProtoRef.failVerification(f)
         except BaseException:
+            # If we raise an exception *at all* during an OpenSSL callback, at
+            # best we lose the exception to getting dumped on stderr rather
+            # than getting logged, at worst it just disappears.  So we catch
+            # *everything* here so we can get it normally logged.
             _log.failure("while verifying certificate")
         # Ensure that no reference remains to the protocol.
         weakProtoRef = None
