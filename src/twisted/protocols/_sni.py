@@ -238,7 +238,9 @@ class PEMObjects:
     @classmethod
     def fromDirectory(cls, directory: FilePath[str]) -> PEMObjects:
         """
-        Load a single PEMObjects from all the PEMs in a big directory.
+        Walk through the given directory looking for files with a `.pem`
+        extension, and instantiate a L{PEMObjects} containing all certificates
+        and key pairs from those files.
 
         @param directory: a L{FilePath} pointing at a directory in the
             filesystem which may contain some PEM files.
