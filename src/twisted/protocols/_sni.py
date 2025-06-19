@@ -221,11 +221,19 @@ def autoReloadingDirectoryOfPEMs(
 @dataclass
 class PEMObjects:
     """
-    A collection of objects loaded from a PEM encoded file.
+    A collection of objects loaded from a collection of PEM-encoded files.
     """
 
-    certificates: List[tuple[FilePath[str], Certificate]]
-    keyPairs: List[tuple[FilePath[str], KeyPair]]
+    _certificates: List[tuple[FilePath[str], Certificate]]
+    """
+    A list of pairs of (FilePath, Certificate) that indicates what files
+    contain what certificates.
+    """
+    _keyPairs: List[tuple[FilePath[str], KeyPair]]
+    """
+    A list of pairs of (FilePath, KeyPair) that indicates what pairs contain
+    what certificates.
+    """
 
     @classmethod
     def fromDirectory(cls, directory: FilePath[str]) -> PEMObjects:
@@ -237,8 +245,8 @@ class PEMObjects:
             if fp.basename().endswith(".pem") and fp.isfile():
                 with fp.open() as f:
                     subself = cls.fromLines(fp, f)
-                    self.certificates.extend(subself.certificates)
-                    self.keyPairs.extend(subself.keyPairs)
+                    self._certificates.extend(subself._certificates)
+                    self._keyPairs.extend(subself._keyPairs)
         return self
 
     @classmethod
@@ -255,10 +263,10 @@ class PEMObjects:
                 blobs.append(b"")
             blobs[-1] += line
         return cls(
-            keyPairs=[
+            _keyPairs=[
                 (fp, KeyPair.load(keyBlob, FILETYPE_PEM)) for keyBlob in keyBlobs
             ],
-            certificates=[
+            _certificates=[
                 (fp, Certificate.loadPEM(certBlob)) for certBlob in certBlobs
             ],
         )
@@ -273,11 +281,11 @@ class PEMObjects:
         certificatesByFingerprint = dict(
             [
                 (certificate.getPublicKey().keyHash(), certificate)
-                for (_, certificate) in self.certificates
+                for (_, certificate) in self._certificates
             ]
         )
 
-        for pairPath, keyPair in self.keyPairs:
+        for pairPath, keyPair in self._keyPairs:
             keyHash = keyPair.keyHash()
             matchingCertificate = certificatesByFingerprint.pop(keyHash, None)
             if matchingCertificate is None:

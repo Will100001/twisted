@@ -3665,7 +3665,7 @@ class ServerStringTests(unittest.TestCase):
         self.assertEqual(subendpoint._port, 1234)
         self.assertEqual(subendpoint._backlog, 12)
         self.assertEqual(subendpoint._interface, "10.0.0.1")
-        ctx = server.contextFactory
+        ctx = server.connectionCreator
         self.assertIsInstance(ctx, endpoints.SNIConnectionCreator)
         factory = TLSMemoryBIOFactory(ctx, False, Factory.forProtocol(Protocol))
         proto = factory.buildProtocol(IPv4Address("TCP", "127.0.0.1", 1234))
