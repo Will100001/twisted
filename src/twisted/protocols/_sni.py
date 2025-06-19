@@ -239,6 +239,9 @@ class PEMObjects:
     def fromDirectory(cls, directory: FilePath[str]) -> PEMObjects:
         """
         Load a single PEMObjects from all the PEMs in a big directory.
+
+        @param directory: a L{FilePath} pointing at a directory in the
+            filesystem which may contain some PEM files.
         """
         self = PEMObjects([], [])
         for fp in directory.walk():
@@ -252,6 +255,9 @@ class PEMObjects:
     def fromFile(cls, fp: FilePath[str]) -> PEMObjects:
         """
         Load some objects from the lines of a single PEM file.
+
+        @param fp: A L{FilePath} pointing at a file on the filesystem whose
+            contents should be PEM data.
         """
         certBlobs: List[bytes] = []
         keyBlobs: List[bytes] = []
