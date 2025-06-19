@@ -2459,6 +2459,6 @@ class _TLSServerEndpointParser:
         self, reactor: IReactorCore, *args: Any, **kwargs: Any
     ) -> IStreamServerEndpoint:
         """
-        Parse a TLS stream server.
+        Parse a TLS stream server endpoint.
         """
         return self._actualParseStreamServer(reactor, *args, **kwargs)
