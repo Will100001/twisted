@@ -1041,7 +1041,8 @@ class ClientTLSOptions:
         C{_hostname} is a DNSName
 
     @ivar _sendServerName: Whether the hostname will be sent via the TLS
-        ServerName Indicatino extension.
+        U{Server Name Indication
+        <https://www.rfc-editor.org/rfc/rfc3546#section-3.1>} extension.
     """
 
     _ctx: Optional[SSL.Context]
