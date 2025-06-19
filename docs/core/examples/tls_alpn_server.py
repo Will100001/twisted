@@ -16,19 +16,19 @@ it.
 To exit the server, use CTRL+C on the command-line.
 
 Before using this, you should generate a new RSA private key and an associated
-X.509 certificate and place it in the working directory as `server-key.pem`
-and `server-cert.pem`.
+X.509 certificate and place it in the working directory as `server-key.pem` and
+`server-cert.pem`.
 
-You can generate a self signed certificate using OpenSSL:
+You can generate a self signed certificate using OpenSSL::
 
     openssl req -new -newkey rsa:2048 -days 3 -nodes -x509 \
         -keyout server-key.pem -out server-cert.pem
 
-To test this, use OpenSSL's s_client command, with either or both of the
--nextprotoneg and -alpn arguments. For example:
+To test this, use OpenSSL's s_client command with the -alpn argument.
+
+For example::
 
     openssl s_client -connect localhost:8080 -alpn h2,http/1.1
-    openssl s_client -connect localhost:8080 -nextprotoneg h2,http/1.1
 
 Alternatively, use the tls_alpn_client.py script found in the examples
 directory.
