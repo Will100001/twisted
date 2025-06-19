@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Callable, Dict, Iterable, List, Tuple
+from typing import Callable, Dict, List, Tuple
 
 from zope.interface import implementer
 
@@ -243,25 +243,25 @@ class PEMObjects:
         self = PEMObjects([], [])
         for fp in directory.walk():
             if fp.basename().endswith(".pem") and fp.isfile():
-                with fp.open() as f:
-                    subself = cls.fromLines(fp, f)
-                    self._certificates.extend(subself._certificates)
-                    self._keyPairs.extend(subself._keyPairs)
+                subself = cls.fromFile(fp)
+                self._certificates.extend(subself._certificates)
+                self._keyPairs.extend(subself._keyPairs)
         return self
 
     @classmethod
-    def fromLines(cls, fp: FilePath[str], pemlines: Iterable[bytes]) -> PEMObjects:
+    def fromFile(cls, fp: FilePath[str]) -> PEMObjects:
         """
-        Load some objects from the lines of a PEM binary file.
+        Load some objects from the lines of a single PEM file.
         """
         certBlobs: List[bytes] = []
         keyBlobs: List[bytes] = []
         blobs = [b""]
-        for line in pemlines:
-            if line.startswith(b"-----BEGIN"):
-                blobs = certBlobs if b"CERTIFICATE" in line else keyBlobs
-                blobs.append(b"")
-            blobs[-1] += line
+        with fp.open() as pemlines:
+            for line in pemlines:
+                if line.startswith(b"-----BEGIN"):
+                    blobs = certBlobs if b"CERTIFICATE" in line else keyBlobs
+                    blobs.append(b"")
+                blobs[-1] += line
         return cls(
             _keyPairs=[
                 (fp, KeyPair.load(keyBlob, FILETYPE_PEM)) for keyBlob in keyBlobs
