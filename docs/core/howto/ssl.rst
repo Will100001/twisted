@@ -5,17 +5,28 @@ Overview
 --------
 
 This document describes how to secure your communications using TLS (Transport Layer Security) --- also known as SSL (Secure Sockets Layer) --- in Twisted servers and clients.
-It assumes that you know what TLS is, what some of the major reasons to use it are, and how to generate your own certificates.
-It also assumes that you are comfortable with creating TCP servers and clients as described in the :doc:`server howto <servers>` and :doc:`client howto <clients>` .
-After reading this document you should be able to create servers and clients that can use TLS to encrypt their connections, switch from using an unencrypted channel to an encrypted one mid-connection, and require client authentication.
+TLS is the protocol underlying the HTTPS protocol, so many of these concepts are used to secure your web server as well.
+
+To read this document, you will need to understand some pre-requisites:
+
+- You should already know how to create TCP servers and clients with Twisted as described in the :doc:`server howto <servers>` and :doc:`client howto <clients>`.
+- You should know how to create an :doc:`Endpoint <endpoints>` .
+- You should be able to obtain trusted TLS certificates, with something like
+  `certbot <https://certbot.eff.org/>`_ and `Let's Encrypt
+  <https://letsencrypt.org>`_
+
+After reading this document you should be able to:
+
+- create servers and clients that can use TLS to encrypt their connectios
+- switch from using an unencrypted channel to an encrypted one mid-connection,
+  and
+- require client authentication using client certificates.
 
 Using TLS in Twisted requires that you have various dependencies installed that are included in Twisted's ``tls`` optional dependency group.
 To ensure that you have the required additional libraries installed, please ``pip install 'twisted[tls]'`` .
 
-Twisted provides TLS support as a transport --- that is, as an alternative to TCP.
-When using TLS, use of the TCP APIs you're already familiar with, ``TCP4ClientEndpoint`` and ``TCP4ServerEndpoint`` --- or ``reactor.listenTCP`` and ``reactor.connectTCP`` --- is replaced by use of parallel TLS APIs (many of which still use the legacy name "SSL" due to age and/or compatibility with older APIs).
-To create a TLS server, use :py:class:`SSL4ServerEndpoint <twisted.internet.endpoints.SSL4ServerEndpoint>` or :py:meth:`listenSSL <twisted.internet.interfaces.IReactorSSL.listenSSL>` .
-To create a TLS client, use :py:class:`SSL4ClientEndpoint <twisted.internet.endpoints.SSL4ClientEndpoint>` or :py:meth:`connectSSL <twisted.internet.interfaces.IReactorSSL.connectSSL>` .
+TLS Security Basics
+-------------------
 
 TLS provides transport layer security, but it's important to understand what "security" means.
 With respect to TLS it means three things:
@@ -27,16 +38,22 @@ With respect to TLS it means three things:
 
 Without identity, neither confidentiality nor integrity is possible.
 If you don't know who you're talking to, then you might as easily be talking to your bank or to a thief who wants to steal your bank password.
-Each of the APIs listed above with "SSL" in the name requires a configuration object called (for historical reasons) a ``contextFactory``.
-(Please pardon the somewhat awkward name.)
-The ``contextFactory`` serves three purposes:
 
-1. It provides the materials to prove your own identity to the other side of the connection: in other words, who you are.
-2. It expresses your requirements of the other side's identity: in other words, who you would like to talk to (and who you trust to tell you that you're talking to the right party).
-3. It allows you to specify certain specialized options about the way the TLS protocol itself operates.
+.. note::
+
+   Twisted's TLS support is currently based on PyOpenSSL (which is, in turn, based on OpenSSL) and inherits certain PyOpenSSL terminology and types.  Twisted will often refer to a TLS *connection*, which is a reference to an :py:class:`pyOpenSSL Connection <OpenSSL.SSL.Connection>`, or a *context*, which is a reference to an :py:class:`pyOpenSSL Context <OpenSSL.SSL.Context>`.
 
 The requirements of clients and servers are slightly different.
-Both *can* provide a certificate to prove their identity, but commonly, TLS *servers* provide a certificate, whereas TLS *clients* check the server's certificate (to make sure they're talking to the right server) and then later identify themselves to the server some other way, often by offering a shared secret such as a password or API key via an application protocol secured with TLS and not as part of TLS itself.
+Both *can* provide a certificate to prove their identity.
+Commonly, however, TLS *servers* provide a certificate, whereas TLS *clients* check the server's certificate (to make sure they're talking to the right server).
+Clients then later identify themselves to the server some other way, often by offering a shared secret (such as a password or API key) via an application protocol secured with TLS, not as part of TLS itself.
+
+Therefore, let's begin with a simple TLS client, that will connect to an existing server.
+
+We can wrap any stream client endpoint with :py:func:`twisted.internet.endpoints.wrapClientTLS`, which will run TLS over whatever transport it provides.
+So, we will 
+
+
 
 Since these requirements are slightly different, there are different APIs to construct an appropriate ``contextFactory`` value for a client or a server.
 
