@@ -50,10 +50,11 @@ Clients then later identify themselves to the server some other way, often by of
 
 Therefore, let's begin with a simple TLS client, that will connect to an existing server.
 
-We can wrap any stream client endpoint with :py:func:`twisted.internet.endpoints.wrapClientTLS`, which will run TLS over whatever transport it provides.
-So, we will 
+We can wrap any stream client endpoint with :py:func:`twisted.internet.endpoints.wrapClientTLS`, which will run an encrypted TLS connection over whatever the underlying transport is.
 
+:download:`echoserv_ssl.py <listings/ssl/wrapped_client.py>`
 
+.. literalinclude:: listings/ssl/wrapped_client.py
 
 Since these requirements are slightly different, there are different APIs to construct an appropriate ``contextFactory`` value for a client or a server.
 
