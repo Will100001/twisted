@@ -39,6 +39,7 @@ from twisted.internet.interfaces import (
     IHostnameResolver,
     IHostResolution,
     IOpenSSLClientConnectionCreator,
+    IOpenSSLServerConnectionCreator,
     IProtocol,
     IProtocolFactory,
     IReactorCore,
@@ -88,7 +89,7 @@ else:
     )
     from twisted.protocols._sni import (
         SNIConnectionCreator,
-        TLSServerEndpoint,
+        TLSServerEndpoint as _TLSServerEndpoint,
         autoReloadingDirectoryOfPEMs,
     )
     from twisted.protocols.tls import TLSMemoryBIOFactory as _TLSMemoryBIOFactory
@@ -112,6 +113,7 @@ __all__ = [
     "HostnameEndpoint",
     "StandardErrorBehavior",
     "connectProtocol",
+    "wrapServerTLS",
     "wrapClientTLS",
 ]
 
@@ -2290,8 +2292,8 @@ def wrapClientTLS(
     clock: IReactorTime | None = None,
 ) -> IStreamClientEndpoint:
     """
-    Wrap an endpoint which upgrades to TLS as soon as the connection is
-    established.
+    Wrap a stream client endpoint which such that it upgrades to TLS as soon as
+    the wrapped connection is established.
 
     @since: 16.0
 
@@ -2316,6 +2318,17 @@ def wrapClientTLS(
             clock=clock,
         ),
     )
+
+
+def wrapServerTLS(
+    connectionCreator: IOpenSSLServerConnectionCreator,
+    wrappedEndpoint: IStreamServerEndpoint,
+    clock: IReactorTime | None = None,
+) -> IStreamServerEndpoint:
+    """
+    Wrap a server endpoint in a TLS configuration.
+    """
+    return _TLSServerEndpoint(wrappedEndpoint, connectionCreator, clock)
 
 
 def _parseClientTLS(
@@ -2450,9 +2463,9 @@ class _TLSServerEndpointParser:
         parameters.
         """
         p = FilePath(path)
-        return TLSServerEndpoint(
-            TCP6ServerEndpoint(reactor, int(port), int(backlog), interface),
+        return wrapServerTLS(
             SNIConnectionCreator(autoReloadingDirectoryOfPEMs(p)),
+            TCP6ServerEndpoint(reactor, int(port), int(backlog), interface),
         )
 
     def parseStreamServer(
