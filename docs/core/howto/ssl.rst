@@ -41,7 +41,12 @@ If you don't know who you're talking to, then you might as easily be talking to 
 
 .. note::
 
-   Twisted's TLS support is currently based on PyOpenSSL (which is, in turn, based on OpenSSL) and inherits certain PyOpenSSL terminology and types.  Twisted will often refer to a TLS *connection*, which is a reference to an :py:class:`pyOpenSSL Connection <OpenSSL.SSL.Connection>`, or a *context*, which is a reference to an :py:class:`pyOpenSSL Context <OpenSSL.SSL.Context>`.
+   Twisted's TLS support is currently based on PyOpenSSL (which is, in turn, based on OpenSSL) and inherits certain PyOpenSSL terminology and types.
+   Twisted will often refer to a TLS *connection*, which is a reference to an :py:class:`pyOpenSSL Connection <OpenSSL.SSL.Connection>`, or a *context*, which is a reference to an :py:class:`pyOpenSSL Context <OpenSSL.SSL.Context>`.
+   You should not need to know PyOpenSSL's API to use Twisted's TLS support, but it's useful to understand that:
+
+   1. A Connection is an object used to individually configure a single connection to a peer, and
+   2. a Context is an object that may be shared among many connections (particularly on a server), that describes common areas of configuration between multiple connections.
 
 The requirements of clients and servers are slightly different.
 Both *can* provide a certificate to prove their identity.
@@ -52,11 +57,15 @@ Therefore, let's begin with a simple TLS client, that will connect to an existin
 
 We can wrap any stream client endpoint with :py:func:`twisted.internet.endpoints.wrapClientTLS`, which will run an encrypted TLS connection over whatever the underlying transport is.
 
+This example client uses a combination of :py:class:`twisted.internet.endpoints.HostnameEndpoint`,  :py:func:`twisted.internet.endpoints.wrapClientTLS`, and :py:func:`twisted.internet.ssl.optionsForClientTLS` to connect to ``example.com`` via TLS, and issue an extremely simple HTTPS request.
+
 :download:`echoserv_ssl.py <listings/ssl/wrapped_client.py>`
 
 .. literalinclude:: listings/ssl/wrapped_client.py
 
 Since these requirements are slightly different, there are different APIs to construct an appropriate ``contextFactory`` value for a client or a server.
+
+On the server side, we can use 
 
 For servers, we can use :py:class:`twisted.internet.ssl.CertificateOptions`.
 In order to prove the server's identity, you pass the ``privateKey`` and ``certificate`` arguments to this object.
