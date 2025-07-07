@@ -1,13 +1,10 @@
 from sys import argv
 
 from twisted.internet.defer import Deferred
-from twisted.internet.endpoints import (
-    HostnameEndpoint,
-    optionsForClientTLS,
-    wrapClientTLS,
-)
+from twisted.internet.endpoints import HostnameEndpoint, wrapClientTLS
 from twisted.internet.interfaces import IReactorTCP, ITCPTransport
 from twisted.internet.protocol import Factory, Protocol
+from twisted.internet.ssl import optionsForClientTLS
 from twisted.internet.task import react
 from twisted.python.failure import Failure
 
