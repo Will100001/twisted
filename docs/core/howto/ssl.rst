@@ -25,6 +25,13 @@ After reading this document you should be able to:
 Using TLS in Twisted requires that you have various dependencies installed that are included in Twisted's ``tls`` optional dependency group.
 To ensure that you have the required additional libraries installed, please ``pip install 'twisted[tls]'`` .
 
+TLS Quick Start
+---------------
+
+To set up a TLS server, use the ``tls:`` string endpoint prefix.
+If you're using a command-line tool with a ``--listen`` argument, such as ``twist web``, pass the directory name of your certificates, as well as any sub-endpoint arguments that you wish to pass.
+For example, if you renew your certificates with ``certbot … --config-dir /var/lib/my-ssl-certs``.
+
 TLS Security Basics
 -------------------
 
@@ -65,7 +72,7 @@ This example client uses a combination of :py:class:`twisted.internet.endpoints.
 
 Since these requirements are slightly different, there are different APIs to construct an appropriate ``contextFactory`` value for a client or a server.
 
-On the server side, we can use 
+On the server side, we can use the ``tls:`` endpoint as well.
 
 For servers, we can use :py:class:`twisted.internet.ssl.CertificateOptions`.
 In order to prove the server's identity, you pass the ``privateKey`` and ``certificate`` arguments to this object.

@@ -4,10 +4,18 @@
 """
 A simple port forwarder.
 """
+from __future__ import annotations
 
-# Twisted imports
 from twisted.internet import protocol
-from twisted.python import log
+from twisted.internet.interfaces import (
+    IConsumer,
+    IPushProducer,
+    IStreamServerEndpoint,
+    ITransport,
+)
+from twisted.logger import Logger
+
+log = Logger()
 
 
 class Proxy(protocol.Protocol):
@@ -23,7 +31,7 @@ class Proxy(protocol.Protocol):
             self.peer.transport.loseConnection()
             self.peer = None
         elif self.noisy:
-            log.msg(f"Unable to connect to peer: {reason}")
+            log.info("Unable to connect to peer: {reason}", reason=reason)
 
     def dataReceived(self, data):
         self.peer.transport.write(data)
@@ -59,11 +67,21 @@ class ProxyClientFactory(protocol.ClientFactory):
         self.server.transport.loseConnection()
 
 
+class _MakeTypesHappy(IPushProducer, IConsumer, ITransport):
+    """
+    L{ProxyServer}'s transport is implicitly assumed to provide several
+    interfaces so include them all here.
+    """
+
+
 class ProxyServer(Proxy):
     clientProtocolFactory = ProxyClientFactory
     reactor = None
+    transport: _MakeTypesHappy
+    factory: ProxyFactory
+    endpoint: IStreamServerEndpoint | None
 
-    def connectionMade(self):
+    def connectionMade(self) -> None:
         # Don't read anything from the connecting client until we have
         # somewhere to send it to.
         self.transport.pauseProducing()
@@ -85,6 +103,6 @@ class ProxyFactory(protocol.Factory):
 
     protocol = ProxyServer
 
-    def __init__(self, host, port):
+    def __init__(self, host: str, port: int) -> None:
         self.host = host
         self.port = port
