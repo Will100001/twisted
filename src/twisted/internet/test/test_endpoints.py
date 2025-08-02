@@ -3132,10 +3132,9 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
         reactor: IReactorTCP,
         serverFactory: IProtocolFactory,
         **listenArgs: object,
-    ) -> tuple[endpoints.TLSServerEndpoint, tuple[object, ...], IPv6Address]:
+    ) -> tuple[IStreamServerEndpoint, tuple[object, ...], IPv6Address]:
         """
-        Create an L{TLSServerEndpoint} and return the tools to verify its
-        behaviour.
+        Create a TLS endpoint and return the tools to verify its behaviour.
 
         @param factory: The thing that we expect to be passed to our
             L{IStreamServerEndpoint.listen} implementation.
@@ -3165,9 +3164,9 @@ class TLSEndpointsTests(EndpointTestCaseMixin, unittest.TestCase):
                 self.serverCert.dumpPEM()
             )
         return (
-            endpoints.TLSServerEndpoint(
-                TCP6ServerEndpoint(reactor, address.port, **listenArgs),
+            endpoints.wrapServerTLS(
                 SNIConnectionCreator(lookupper),
+                TCP6ServerEndpoint(reactor, address.port, **listenArgs),
                 clock=IReactorTime(reactor),
             ),
             (
@@ -3659,7 +3658,7 @@ class ServerStringTests(unittest.TestCase):
             reactor,
             f"tls:{tmp}:1234:backlog=12:interface=10.0.0.1",
         )
-        self.assertIsInstance(server, endpoints.TLSServerEndpoint)
+        self.assertIsInstance(server, endpoints._TLSServerEndpoint)
         subendpoint = server.endpoint
         self.assertIs(subendpoint._reactor, reactor)
         self.assertEqual(subendpoint._port, 1234)
