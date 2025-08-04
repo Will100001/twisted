@@ -372,11 +372,9 @@ class DBTestConnector:
 
     def startDB(self):
         """Take any steps needed to bring database up."""
-        pass
 
     def stopDB(self):
         """Bring database down, if needed."""
-        pass
 
     def makePool(self, **newkw):
         """Create a connection pool with additional keyword arguments."""

@@ -439,7 +439,6 @@ class POP3(basic.LineOnlyReceiver, policies.TimeoutMixin):
     AUTH_CMDS = [b"CAPA", b"USER", b"PASS", b"APOP", b"AUTH", b"RPOP", b"QUIT"]
 
     portal = None
-    factory = None
 
     # The mailbox we're serving
     mbox = None
@@ -1413,13 +1412,11 @@ class Mailbox:
         Any message which can be undeleted should be returned to its original
         position in the message sequence and retain its original UID.
         """
-        pass
 
     def sync(self) -> None:
         """
         Discard the contents of any message marked for deletion.
         """
-        pass
 
 
 NONE, SHORT, FIRST_LONG, LONG = range(4)

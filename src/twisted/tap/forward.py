@@ -9,7 +9,7 @@ from typing import Any
 from twisted.application import strports
 from twisted.application.service import IService
 from twisted.internet.endpoints import clientFromString
-from twisted.protocols.forward import EndpointForwarderFactory
+from twisted.protocols.forward import forwarder
 from twisted.python import usage
 
 
@@ -41,6 +41,6 @@ def makeService(config: Options) -> IService:
 
     return strports.service(
         config["listen"],
-        EndpointForwarderFactory(clientFromString(reactor, config["connect"])),
+        forwarder(clientFromString(reactor, config["connect"])),
         reactor,
     )

@@ -1396,7 +1396,6 @@ class IRCClient(basic.LineReceiver):
         """
         Called when I have a message from a user to me or a channel.
         """
-        pass
 
     def joined(self, channel):
         """
@@ -1459,19 +1458,16 @@ class IRCClient(basic.LineReceiver):
         """
         Called with the results of a CTCP PING query.
         """
-        pass
 
     def signedOn(self):
         """
         Called after successfully signing on to the server.
         """
-        pass
 
     def kickedFrom(self, channel, kicker, message):
         """
         Called when I am kicked from a channel.
         """
-        pass
 
     def nickChanged(self, nick):
         """
@@ -1485,31 +1481,26 @@ class IRCClient(basic.LineReceiver):
         """
         Called when I see another user joining a channel.
         """
-        pass
 
     def userLeft(self, user, channel):
         """
         Called when I see another user leaving a channel.
         """
-        pass
 
     def userQuit(self, user, quitMessage):
         """
         Called when I see another user disconnect from the network.
         """
-        pass
 
     def userKicked(self, kickee, channel, kicker, message):
         """
         Called when I observe someone else being kicked from a channel.
         """
-        pass
 
     def action(self, user, channel, data):
         """
         Called when I see a user perform an ACTION on a channel.
         """
-        pass
 
     def topicUpdated(self, user, channel, newTopic):
         """
@@ -1517,13 +1508,11 @@ class IRCClient(basic.LineReceiver):
 
         Also called when first joining a channel.
         """
-        pass
 
     def userRenamed(self, oldname, newname):
         """
         A user changed their name from oldname to newname.
         """
-        pass
 
     ### Information from the server.
 
@@ -1538,7 +1527,6 @@ class IRCClient(basic.LineReceiver):
 
         to get a nicely formatted string.
         """
-        pass
 
     ### user input commands, client->server
     ### Your client will want to invoke these.
@@ -2501,7 +2489,6 @@ class IRCClient(basic.LineReceiver):
             should resume.
         @type resumePos: L{int}
         """
-        pass
 
     def dccDoAcceptResume(self, user, file, port, resumePos):
         """
@@ -2522,7 +2509,6 @@ class IRCClient(basic.LineReceiver):
             should resume.
         @type resumePos: L{int}
         """
-        pass
 
     def dccDoChat(self, user, channel, address, port, data):
         pass
@@ -2851,7 +2837,7 @@ class DccSendProtocol(protocol.Protocol, styles.Ephemeral):
 
 
 class DccSendFactory(protocol.Factory):
-    protocol = DccSendProtocol  # type: ignore[assignment]
+    protocol = DccSendProtocol
 
     def __init__(self, file):
         self.file = file
@@ -2963,7 +2949,7 @@ class DccChat(basic.LineReceiver, styles.Ephemeral):
 
 
 class DccChatFactory(protocol.ClientFactory):
-    protocol = DccChat  # type: ignore[assignment]
+    protocol = DccChat
     noisy = False
 
     def __init__(self, client, queryData):

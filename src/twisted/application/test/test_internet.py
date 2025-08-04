@@ -42,7 +42,6 @@ def fakeTargetFunction():
     """
     A fake target function for testing TimerService which does nothing.
     """
-    pass
 
 
 @implementer(IStreamServerEndpoint)

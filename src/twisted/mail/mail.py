@@ -383,7 +383,6 @@ class BounceDomain:
         @type password: L{bytes}
         @param password: A password.
         """
-        pass
 
     def getCredentialsCheckers(self):
         """

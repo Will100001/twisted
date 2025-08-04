@@ -285,8 +285,6 @@ class POP3Error(Exception):
     The base class for POP3 errors.
     """
 
-    pass
-
 
 class _POP3MessageDeleted(Exception):
     """

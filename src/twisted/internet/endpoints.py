@@ -214,7 +214,8 @@ class _WrappingFactory(ClientFactory):
     """
 
     # Type is wrong.  See https://twistedmatrix.com/trac/ticket/10005#ticket
-    protocol = _WrappingProtocol  # type: ignore[assignment]
+
+    protocol = _WrappingProtocol
 
     def __init__(self, wrappedFactory: IProtocolFactory) -> None:
         """

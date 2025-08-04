@@ -1050,7 +1050,6 @@ class SubunitReporter:
         We do nothing, since a summary clause is irrelevant to the subunit
         protocol.
         """
-        pass
 
     @property
     def shouldStop(self):

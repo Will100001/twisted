@@ -208,8 +208,6 @@ def generateElementsNamed(list, name):
 class SerializedXML(str):
     """Marker class for pre-serialized XML in the DOM."""
 
-    pass
-
 
 class Namespace:
     """Convenience object for tracking namespace declarations."""
@@ -589,8 +587,6 @@ class Element:
 
 class ParserError(Exception):
     """Exception thrown when a parsing error occurs"""
-
-    pass
 
 
 def elementStream():

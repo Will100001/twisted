@@ -61,8 +61,6 @@ class TerminalException(Exception):
     file.
     """
 
-    pass
-
 
 class BasicTests(TestCase):
     """

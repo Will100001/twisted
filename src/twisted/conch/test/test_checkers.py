@@ -795,8 +795,6 @@ class _DummyException(Exception):
     Fake exception to be used for testing.
     """
 
-    pass
-
 
 class SSHPublicKeyCheckerTests(TestCase):
     """

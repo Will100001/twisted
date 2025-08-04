@@ -121,7 +121,6 @@ class LoggingFile:
         """
         No-op; this file does not buffer.
         """
-        pass
 
     def fileno(self) -> int:
         """

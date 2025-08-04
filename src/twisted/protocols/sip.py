@@ -1023,7 +1023,6 @@ class Proxy(Base):
         """
         Called with responses that are addressed at this server.
         """
-        pass
 
 
 class IAuthorizer(Interface):
@@ -1070,7 +1069,6 @@ class RegisterProxy(Proxy):
         # However, we should keep track of terminal messages and re-transmit
         # if no ACK is received.
         (host, port) = host_port
-        pass
 
     def handle_REGISTER_request(self, message, host_port):
         """

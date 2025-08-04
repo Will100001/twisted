@@ -1396,7 +1396,6 @@ class GettableResource(resource.Resource):
         The unusual method name is designed to test the culling method
         in C{twisted.web.resource._computeAllowedMethods}.
         """
-        pass
 
 
 class AllowedMethodsTests(unittest.TestCase):

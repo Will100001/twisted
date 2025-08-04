@@ -469,7 +469,6 @@ class IRCUser(irc.IRC):
 
         [Optional]
         """
-        pass
 
     def irc_PRIVMSG(self, prefix, params):
         """

@@ -2439,7 +2439,6 @@ class DummyQueue:
         @type message: L{bytes}
         @param message: The base filename of a message.
         """
-        pass
 
 
 class DummySmartHostSMTPRelayingManager:

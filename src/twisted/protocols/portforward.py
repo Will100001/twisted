@@ -20,8 +20,8 @@ log = Logger()
 
 class Proxy(protocol.Protocol):
     noisy = True
-
     peer = None
+    factory: protocol.Factory[Proxy]
 
     def setPeer(self, peer):
         self.peer = peer
@@ -52,7 +52,7 @@ class ProxyClient(Proxy):
         self.peer.transport.resumeProducing()
 
 
-class ProxyClientFactory(protocol.ClientFactory):
+class ProxyClientFactory(protocol.ClientFactory[ProxyClient]):  # type:ignore[type-var]
     protocol = ProxyClient
 
     def setServer(self, server):
@@ -74,11 +74,11 @@ class _MakeTypesHappy(IPushProducer, IConsumer, ITransport):
     """
 
 
-class ProxyServer(Proxy):
+class ProxyServer(protocol.Protocol):
     clientProtocolFactory = ProxyClientFactory
     reactor = None
     transport: _MakeTypesHappy
-    factory: ProxyFactory
+    # factory: ProxyFactory
     endpoint: IStreamServerEndpoint | None
 
     def connectionMade(self) -> None:
@@ -96,12 +96,10 @@ class ProxyServer(Proxy):
         self.reactor.connectTCP(self.factory.host, self.factory.port, client)
 
 
-class ProxyFactory(protocol.Factory):
+class ProxyFactory(protocol.Factory[ProxyServer]):
     """
     Factory for port forwarder.
     """
-
-    protocol = ProxyServer
 
     def __init__(self, host: str, port: int) -> None:
         self.host = host

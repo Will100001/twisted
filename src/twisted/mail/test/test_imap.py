@@ -1737,7 +1737,6 @@ class UncloseableMailbox:
         """
         Destroy this mailbox.
         """
-        pass
 
     def getHierarchicalDelimiter(self):
         """

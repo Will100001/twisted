@@ -33,8 +33,6 @@ class ITestable(Interface):
     An interface for a theoretical protocol.
     """
 
-    pass
-
 
 class TestAvatar:
     """
@@ -59,8 +57,6 @@ class Testable(components.Adapter):
     """
     A theoretical protocol for testing.
     """
-
-    pass
 
 
 components.registerAdapter(Testable, TestAvatar, ITestable)

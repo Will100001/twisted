@@ -1,6 +1,7 @@
 """
 Generic forwarder from a stream server listener to a stream client.
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
@@ -9,7 +10,6 @@ from zope.interface import implementer
 
 from twisted.internet.defer import Deferred
 from twisted.internet.interfaces import (
-    IAddress,
     IProtocol,
     IProtocolFactory,
     IStreamClientEndpoint,
@@ -24,6 +24,7 @@ class _ForwardingListener:
     _forwardTo: IStreamClientEndpoint
     _transport: Any = field(init=False)
     _otherTransport: Any = field(init=False)
+    factory: Factory[_ForwardingListener] = field(init=False)
 
     def makeConnection(self, transport: Any) -> None:
         self._transport = transport
@@ -31,7 +32,7 @@ class _ForwardingListener:
         async def _() -> None:
             transport.pauseProducing()
             proto: Any = await self._forwardTo.connect(
-                Factory.forProtocol(_ForwardingConnection)
+                Factory.forProtocol(lambda: _ForwardingConnection(transport))
             )
             self._otherTransport = proto.transport
             proto.transport.registerProducer(transport)
@@ -59,6 +60,7 @@ class _ForwardingListener:
 @dataclass
 class _ForwardingConnection:
     _otherTransport: Any
+    factory: Factory[_ForwardingConnection] = field(init=False)
 
     def makeConnection(self, transport: Any) -> None:
         ...
@@ -78,23 +80,9 @@ class _ForwardingConnection:
         transport.unregisterProducer()
 
 
-@implementer(IProtocolFactory)
-@dataclass
-class EndpointForwarderFactory:
-    _forwardTo: IStreamClientEndpoint
-
-    def doStart(self) -> None:
-        """
-        start listening.
-        """
-
-    def doStop(self) -> None:
-        """
-        stopped listening.
-        """
-
-    def buildProtocol(self, addr: IAddress) -> IProtocol:
-        """
-        build a protocol
-        """
-        return _ForwardingListener(self._forwardTo)
+def forwarder(to: IStreamClientEndpoint) -> IProtocolFactory:
+    """
+    Create a listening protocol factory that will forward its incoming
+    connections to the given client endpoint.
+    """
+    return Factory.forProtocol(lambda: _ForwardingListener(to))

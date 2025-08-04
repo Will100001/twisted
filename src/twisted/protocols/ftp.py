@@ -3421,7 +3421,6 @@ class FTPFileListProtocol(basic.LineReceiver):
         @param line: unparsable line as received
         @type line: str
         """
-        pass
 
 
 def parsePWDResponse(response):

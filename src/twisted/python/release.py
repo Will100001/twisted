@@ -20,15 +20,11 @@ class DirectoryExists(OSError):
     Some directory exists when it shouldn't.
     """
 
-    pass
-
 
 class DirectoryDoesntExist(OSError):
     """
     Some directory doesn't exist when it should.
     """
-
-    pass
 
 
 class CommandFailed(OSError):

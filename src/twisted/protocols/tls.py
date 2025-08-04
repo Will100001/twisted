@@ -185,6 +185,14 @@ class TLSMemoryBIOProtocol(ProtocolWrapper):
     _lostTLSConnection = False
     _producer = None
     _aborted = False
+
+    # we are a ProtocolWrapper and thus ->Protocol. in order LSP substitute to
+    # Protocol, self.factory must be (invariant: the attribute is read/write!)
+    # Factory[Self] | None. Thus, constraining it to TLSMemoryBIOFactory like
+    # this is invalid; a client of Protocol looking at an instance of
+    # TLSMemoryBIOProtocol might want to assign some arbitrary .factory and
+    # that would be wrong.
+
     factory: TLSMemoryBIOFactory
 
     def __init__(self, factory, wrappedProtocol, _connectWrapped=True):
@@ -708,7 +716,7 @@ class BufferingTLSTransport(TLSMemoryBIOProtocol):
         super().loseConnection()
 
 
-class TLSMemoryBIOFactory(WrappingFactory):
+class TLSMemoryBIOFactory(WrappingFactory[TLSMemoryBIOProtocol]):
     """
     L{TLSMemoryBIOFactory} adds TLS to connections.
 
@@ -716,7 +724,7 @@ class TLSMemoryBIOFactory(WrappingFactory):
         L{TLSMemoryBIOProtocol}.
     """
 
-    protocol = BufferingTLSTransport
+    protocol: type[TLSMemoryBIOProtocol] = BufferingTLSTransport
 
     noisy = False  # disable unnecessary logging.
 
@@ -769,7 +777,7 @@ class TLSMemoryBIOFactory(WrappingFactory):
             application-level protocol.
         @type wrappedFactory: L{twisted.internet.interfaces.IProtocolFactory}
         """
-        WrappingFactory.__init__(self, wrappedFactory)
+        super().__init__(wrappedFactory)
 
         self._creatorCallable = _convertToAppropriateFactory(isClient, contextFactory)
 

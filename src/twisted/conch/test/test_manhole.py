@@ -417,8 +417,6 @@ class ManholeLoopbackTelnetTests(_TelnetMixin, unittest.TestCase, ManholeLoopbac
     Test manhole loopback over Telnet.
     """
 
-    pass
-
 
 class ManholeLoopbackSSHTests(_SSHMixin, unittest.TestCase, ManholeLoopbackMixin):
     """

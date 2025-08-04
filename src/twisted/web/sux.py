@@ -621,7 +621,6 @@ class XMLParser(Protocol):
         """Encountered comment.
 
         Default behaviour is to ignore."""
-        pass
 
     def gotCData(self, cdata):
         """Encountered CDATA
