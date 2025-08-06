@@ -57,8 +57,8 @@ class _ProtoWithFactory(TypingProtocol):
     def factory(self) -> Factory[Self]:
         ...
 
-    @property.setter
-    def factory(self, value: Any) -> None:  # noqa:F811
+    @factory.setter
+    def factory(self, value: Any) -> None:
         ...
 
     def dataReceived(self, data: bytes) -> None:
